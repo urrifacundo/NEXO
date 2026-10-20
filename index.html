@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Radar Carga</title>
+<title>NEXO · Carga</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%231D4A73%22/%3E%3Cpath%20d%3D%22M18%2046V18L46%2046V18%22%20fill%3D%22none%22%20stroke%3D%22%239CC3E6%22%20stroke-width%3D%224.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22/%3E%3Ccircle%20cx%3D%2218%22%20cy%3D%2246%22%20r%3D%226%22%20fill%3D%22%23fff%22/%3E%3Ccircle%20cx%3D%2218%22%20cy%3D%2218%22%20r%3D%226%22%20fill%3D%22%23fff%22/%3E%3Ccircle%20cx%3D%2246%22%20cy%3D%2218%22%20r%3D%226%22%20fill%3D%22%23fff%22/%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%225%22%20fill%3D%22%23fff%22/%3E%3Ccircle%20cx%3D%2246%22%20cy%3D%2246%22%20r%3D%2211%22%20fill%3D%22none%22%20stroke%3D%22%23F8B26A%22%20stroke-width%3D%221.6%22/%3E%3Ccircle%20cx%3D%2246%22%20cy%3D%2246%22%20r%3D%227.5%22%20fill%3D%22%23F08A24%22/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -44,6 +45,11 @@ button:disabled{opacity:.45;cursor:default}
 kbd,.kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;background:var(--panel);color:var(--ink)}
 
 .top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px max(16px,env(safe-area-inset-left,0px));background:var(--panel);border-bottom:1px solid var(--line)}
+.brandwrap{display:flex;align-items:center;gap:9px}
+.logo{width:32px;height:32px;flex:none}
+.logo.big{width:56px;height:56px}
+.hero{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+.hero h1{margin:0}
 .brand{display:flex;flex-direction:column;line-height:1.1;margin-right:6px}
 .brand b{font-size:16px;letter-spacing:.06em}
 .brand span{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.09em}
@@ -194,7 +200,7 @@ body.sup .tabs,body.sup #vCarga,body.sup .op-only{display:none!important}
 <body>
 
 <section id="scrSetup" class="screen" hidden>
-  <h1>RADAR · CARGA</h1>
+  <div class="hero"><svg class="logo big" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#1D4A73"/><path d="M18 46V18L46 46V18" fill="none" stroke="#9CC3E6" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="18" cy="46" r="6" fill="#fff"/><circle cx="18" cy="18" r="6" fill="#fff"/><circle cx="46" cy="18" r="6" fill="#fff"/><circle cx="32" cy="32" r="5" fill="#fff"/><circle cx="46" cy="46" r="11" fill="none" stroke="#F8B26A" stroke-width="1.6"/><circle cx="46" cy="46" r="7.5" fill="#F08A24"/></svg><h1>NEXO · CARGA</h1></div>
   <p class="lead">Abrí el paquete que te mandó el supervisor y cargá tus hechos de a uno. Lo que vayas guardando queda en esta computadora; al terminar el día, tocá “Enviar avance”.</p>
   <div class="step">
     <h2>1 · ¿Quién trabaja?</h2>
@@ -229,7 +235,7 @@ body.sup .tabs,body.sup #vCarga,body.sup .op-only{display:none!important}
 
 <section id="scrDesk" hidden>
   <header class="top">
-    <div class="brand"><b>RADAR</b><span id="topPartidos"></span></div>
+    <div class="brandwrap"><svg class="logo" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#1D4A73"/><path d="M18 46V18L46 46V18" fill="none" stroke="#9CC3E6" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="18" cy="46" r="6" fill="#fff"/><circle cx="18" cy="18" r="6" fill="#fff"/><circle cx="46" cy="18" r="6" fill="#fff"/><circle cx="32" cy="32" r="5" fill="#fff"/><circle cx="46" cy="46" r="11" fill="none" stroke="#F8B26A" stroke-width="1.6"/><circle cx="46" cy="46" r="7.5" fill="#F08A24"/></svg><div class="brand"><b>NEXO</b><span id="topPartidos"></span></div></div>
     <div class="tabs" role="tablist">
       <button class="tab on" data-tab="carga" role="tab">Carga</button>
       <button class="tab" data-tab="analisis" role="tab">Análisis</button>
@@ -621,7 +627,7 @@ function marcarCoordenadas(lote){
 async function cargarCrudo(file){
   const op = leerOperador(); if (!op) return;
   let rows; try { rows = filasDe(await leerArchivo(file)); } catch(e){ return msgSetup(e.message || String(e), true); }
-  if (!rows.length || !('partido_hecho' in rows[0]) || !('calificaciones' in rows[0])) return msgSetup('Este archivo no tiene el formato del Excel de denuncias (faltan columnas como partido_hecho o calificaciones). Si es un Excel exportado desde Radar, usá “Importar Excel exportado”.', true);
+  if (!rows.length || !('partido_hecho' in rows[0]) || !('calificaciones' in rows[0])) return msgSetup('Este archivo no tiene el formato del Excel de denuncias (faltan columnas como partido_hecho o calificaciones). Si es un Excel exportado desde NEXO, usá “Importar Excel exportado”.', true);
   const conIA = Object.keys(rows[0]).some(k => /^IA_/i.test(k));
   LAST_ROWS = rows;
   const ps = new Set(op.partidos.map(normP));
@@ -664,7 +670,7 @@ async function cargarCrudo(file){
     <div><b>${nuevos}</b> nuevos · <b>${ya}</b> ya estaban (se conservó lo trabajado) · <b>${alertas}</b> con la ubicación a revisar</div>
     ${mis === 0 ? `<div class="flag bad">Ningún hecho coincide con tus partidos. El archivo trae: ${otros.map(([p,n])=>esc(p)+' ('+n+')').join(', ')}</div>` : otros.length ? `<div class="hint">No son tuyos: ${otros.map(([p,n])=>esc(p)+' ('+n+')').join(', ')}</div>` : ''}
     ${MODO === 'supervisor' && mis ? `<div style="margin-top:10px"><b>Paquetes para las operadoras</b> (solo los hechos útiles de sus partidos):</div><div class="paq">${ASIG_OPS.map((a, i) => `<button class="btn" data-paq="${i}">Descargar paquete · ${esc(a.nombre)} (${contarPaquete(a)} hechos)</button>`).join('')}</div>
-      <p class="hint">Mandale a cada una su paquete. Ella lo abre en Radar Carga y empieza. Cuando te devuelva su avance, lo importás abajo.</p>` : ''}
+      <p class="hint">Mandale a cada una su paquete. Ella lo abre en NEXO Carga y empieza. Cuando te devuelva su avance, lo importás abajo.</p>` : ''}
     ${mis ? `<div style="margin-top:8px"><button class="btn primary" id="btnGo">${MODO === 'supervisor' ? 'Ver análisis' : 'Empezar a cargar'}</button></div>` : ''}`;
   const go = $('#btnGo'); if (go) go.onclick = abrirMesa;
 }
@@ -725,14 +731,14 @@ function exportar(){
     ['Registros', recs.length], ['Completos', st.Completo], ['Pendientes', st.Pendiente], ['Para consultar', st.Consultar], ['Descartados', st.Descartar], [],
     ['Nota', 'El relato no se exporta (tiene datos personales). En los pendientes, DELITO y demás datos son los sugeridos.']]), 'INFO');
   const nom = norm(OP.nombre).replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'') || 'operador';
-  XLSX.writeFile(wb, MODO === 'supervisor' ? `Radar_consolidado_${todayISO()}.xlsx` : `Avance_${nom}_${todayISO()}.xlsx`);
+  XLSX.writeFile(wb, MODO === 'supervisor' ? `NEXO_consolidado_${todayISO()}.xlsx` : `Avance_${nom}_${todayISO()}.xlsx`);
   sinceExport = 0; lsSet(MODO + '_rd_since', 0); actualizarBanner(); toast(MODO === 'supervisor' ? 'Excel consolidado exportado.' : 'Avance exportado. Mandáselo al supervisor.');
 }
 async function importarAvance(files){
   let ok = 0, nuevos = 0; const lote = [];
   for (const file of files) {
     let rows; try { const wb = await leerArchivo(file); rows = filasDe(wb, wb.Sheets['CARGA'] ? 'CARGA' : null); } catch(e){ return msgSetup(e.message || String(e), true); }
-    if (!rows.length || !('ID delito' in rows[0]) || !('DELITO' in rows[0])) return msgSetup(`“${file.name}” no es un Excel exportado desde Radar.`, true);
+    if (!rows.length || !('ID delito' in rows[0]) || !('DELITO' in rows[0])) return msgSetup(`“${file.name}” no es un Excel exportado desde NEXO.`, true);
     for (const x of rows){
       const id = String(x['ID delito']); let r = RECS.get(id);
       if (!r) { const lat = num(x.LAT), lon = num(x.LON), P = normP(x.Partido);
@@ -1150,7 +1156,7 @@ function verConsulta(id){
     <p class="hint">Carátula: ${esc(r.cal)} · ${esc(val(r,'delito'))} ${esc(val(r,'modal'))} · ${fmtF(fechaFinal(r))} · ${esc(r.calle)} ${esc(r.altura)}</p>
     ${r.ia?.resumen ? `<div class="ia"><b class="lab">Lectura de IA</b>${esc(r.ia.resumen)}</div>` : ''}
     ${r.relato ? `<div class="relato" style="font-size:13px;max-height:45vh;overflow:auto">${resaltar(r.relato)}</div>` : '<p class="hint">El relato está en el Excel crudo: cargalo para verlo acá.</p>'}
-    <p class="hint">Respondele a la operadora por el canal habitual; ella corrige el hecho en su Radar.</p>
+    <p class="hint">Respondele a la operadora por el canal habitual; ella corrige el hecho en su NEXO.</p>
     <p style="text-align:right"><button class="btn primary" onclick="document.getElementById('modal').hidden=true">Cerrar</button></p>`;
   $('#modal').hidden = false;
 }
