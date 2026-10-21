@@ -542,12 +542,54 @@ function sug(r, k){
   else if (k === 'vedad') s = iaS(ia.victima_edad) || sugKeyword(r, k);
   else if (k === 'asexo') s = iaS(ia.autores_sexo) || sugKeyword(r, k);
   else if (k === 'amenor') s = iaS(ia.autores_menores);
+  else if (k === 'comisaria') { const t = tipoDep(r.dep, r.partido);
+    if (t === 'territorial') s = { v:r.dep, why:'la dependencia que tomó la denuncia' };
+    else { const c = comisariaCercana(r); s = c ? { v:c, why:'las denuncias que se toman alrededor del lugar del hecho' } : null; } }
   else if (k === 'fecha') s = iaS(toISODate(ia.fecha)) || sugKeyword(r, k);
   else if (k === 'hora') s = iaS(toHHMM(ia.hora)) || sugKeyword(r, k);
   r._s[ck] = s; return s;
 }
 const val = (r, k) => r.f[k] || (sug(r, k) || {}).v || '';
 const isSug = (r, k) => !r.f[k] && !!(sug(r, k) || {}).v;
+
+/* comisaría de jurisdicción */
+// Territorial = comisaría, subcomisaría o destacamento con jurisdicción. Especial = DDI, judiciales, comisaría de la mujer, vial, delegaciones, etc.
+function tipoDep(dep, partido){
+  const d = norm(dep).toUpperCase();
+  if (!d) return 'sin dato';
+  if (/^(DDI|D\.D\.I|DDITDI|SEC\.|DIV\.|DELEG|EST\.|DTO\.VIAL|CRIA\.MUJER)/.test(d) || /MUJER Y FLIA|CIBERCRIMEN|JUDICIALES/.test(d)) return 'especial';
+  if (/^(CRIA|SUBCRIA|DTO|DESTAC|COMISARIA)/.test(d)) {
+    if (/^CRIA\./.test(d)) { const p = normP(partido), nombre = d.replace(/^CRIA\./,''); const alias = p === 'TRES DE FEBRERO' ? ['TRES DE FEBRERO','3 DE FEBRERO'] : [p];
+      if (!alias.some(a => nombre.startsWith(a))) return 'otro partido'; }
+    return 'territorial';
+  }
+  return 'especial';
+}
+let _comis = null;
+function comisariasDe(partido){
+  if (!_comis) {
+    // una dependencia territorial pertenece al partido donde ocurre la mayoría de sus hechos
+    const cnt = {};
+    for (const r of RECS.values()) { if (tipoDep(r.dep, r.partido) !== 'territorial') continue; (cnt[r.dep] ||= {})[r.partido] = (cnt[r.dep][r.partido] || 0) + 1; }
+    _comis = {};
+    for (const [dep, por] of Object.entries(cnt)) { const tot = Object.values(por).reduce((a,b)=>a+b,0); for (const [p, n] of Object.entries(por)) if (n / tot >= 0.6) (_comis[p] ||= new Set()).add(dep); }
+    const extra = lsGet(MODO + '_rd_comis_extra', {}); for (const [p, l] of Object.entries(extra)) l.forEach(c => (_comis[p] ||= new Set()).add(c));
+  }
+  const ord = c => { const m = norm(c).match(/(\d+)\s*(ra|da|ta|ma|va|na|er|era)?\b/); return (norm(c).replace(/\d+.*$/,'')) + String(m ? +m[1] : 0).padStart(3,'0') + c; };
+  return [...(_comis[partido] || [])].sort((a,b) => ord(a).localeCompare(ord(b)));
+}
+function comisariaCercana(r){
+  const ll = latlon(r) || (r.chk === 'OK' ? [r.lat0, r.lon0] : null); if (!ll) return null;
+  const lista = new Set(comisariasDe(r.partido)); const votos = {}; let best = null, bd = 9;
+  for (const x of RECS.values()) {
+    if (x.id === r.id || x.partido !== r.partido || !lista.has(x.dep) || x.chk !== 'OK' || x.alertCoord) continue;
+    const d = km(ll[0], ll[1], x.lat0, x.lon0);
+    if (d <= 0.8) votos[x.dep] = (votos[x.dep] || 0) + (1 / (0.1 + d)) * (norm(x.localidad) === norm(r.localidad) ? 3 : 1);
+    if (d < bd) { bd = d; best = x.dep; }
+  }
+  const top = Object.entries(votos).sort((a,b) => b[1]-a[1])[0];
+  return top ? top[0] : (bd <= 2 ? best : null);
+}
 
 /* controles automáticos */
 function coordCheck(lat, lon, partido){
@@ -656,7 +698,7 @@ async function cargarCrudo(file){
     base.f = { estado:'Pendiente', coord: base.chk === 'OK' ? 'OK' : '' };
     RECS.set(id, base); lote.push(base);
   }
-  marcarCoordenadas(lote);
+  marcarCoordenadas(lote); _comis = null;
   for (const r of lote) if (r.alertCoord && r.f.coord === 'OK' && r.f.estado === 'Pendiente') r.f.coord = '';
   let maxN = Math.max(0, ...[...RECS.values()].map(r => r.n || 0));
   lote.sort((a,b) => (a.partido+a.fcarga).localeCompare(b.partido+b.fcarga)).forEach(r => { if (!r.n) r.n = ++maxN; });
@@ -691,7 +733,7 @@ const EXPORT_COLS = [
   ['N°', r => r.n], ['ID delito', r => r.id, 'id'], ['IPP', r => r.ipp, 'ipp'], ['Fecha hecho', r => fechaFinal(r), 'fecha'], ['Hora hecho', r => horaFinal(r), 'hora'],
   ['Día', diaDe], ['Franja horaria', franjaDe], ['Fecha carga', r => r.fcarga, 'fcarga'],
   ['Partido', r => r.partido, 'partido'], ['Localidad', r => r.localidad, 'localidad'], ['Calle', r => r.calle, 'calle'], ['Altura', r => r.altura, 'altura'], ['Esquina / entre', r => r.entre, 'entre'],
-  ['Dependencia', r => r.dep, 'dep'], ['Carátula original', r => r.cal, 'cal'],
+  ['Dependencia', r => r.dep, 'dep'], ['Comisaría jurisdicción', r => val(r,'comisaria'), 'f.comisaria'], ['Carátula original', r => r.cal, 'cal'],
   ['DELITO', r => val(r,'delito'), 'f.delito'], ['MODALIDAD', r => val(r,'modal'), 'f.modal'],
   ['LAT', r => (latlon(r)||[''])[0], 'lat'], ['LON', r => (latlon(r)||['',''])[1], 'lon'], ['Estado ubicación', r => coordEstado(r)[0], 'f.coord'],
   ['Arma', r => val(r,'arma'), 'f.arma'], ['Autores', r => val(r,'naut'), 'f.naut'], ['Movilidad autores', r => val(r,'movil'), 'f.movil'], ['Descripción autores / vehículo', r => val(r,'desc'), 'f.desc'],
@@ -757,7 +799,7 @@ async function importarAvance(files){
       ok++; lote.push(r);
     }
   }
-  await dbPut(lote);
+  await dbPut(lote); _comis = null;
   msgSetup(`${ok} registros importados (${nuevos} nuevos en esta computadora).`, false);
   $('#loadSummary').insertAdjacentHTML('beforeend', '<div style="margin-top:8px"><button class="btn primary" id="btnGo">Entrar</button></div>');
   $('#btnGo').onclick = abrirMesa;
@@ -853,6 +895,15 @@ function chips(r, k, values, big){
   return `<div class="chips${big?' big':''}">${values.map(v => { const on = cur === v, sg = !cur && s && s.v === v; return `<button type="button" class="chip${on?' on':''}${sg?' sug':''}" data-f="${k}" data-v="${esc(v)}" ${sg ? `title="Sugerido por ${esc(s.why)}"` : ''}>${esc(v)}</button>`; }).join('')}</div>`;
 }
 function txt(r, k, ph, mono){ const s = sug(r,k); const v = r.f[k] ?? ''; const sg = !r.f[k] && s; return `<input class="txt${mono?' mono':''}${sg?' sug':''}" data-in="${k}" id="i_${k}" value="${esc(v || (sg ? s.v : ''))}" placeholder="${esc(ph)}" ${sg ? `title="Sugerido por ${esc(s.why)}"` : ''}>`; }
+function comisariaHTML(r){
+  const lista = comisariasDe(r.partido), s = sug(r, 'comisaria'), cur = r.f.comisaria || (s ? s.v : ''), t = tipoDep(r.dep, r.partido);
+  if (cur && !lista.includes(cur)) lista.push(cur);
+  const aviso = t === 'especial' ? `Denuncia tomada por <b>${esc(r.dep)}</b>: elegí la comisaría del lugar del hecho.` : t === 'otro partido' ? `La denuncia se tomó en otro partido (${esc(r.dep)}): elegí la comisaría del lugar del hecho.` : '';
+  return `<select class="txt${!r.f.comisaria && s ? ' sug' : ''}" data-sel="comisaria" id="i_comisaria" aria-label="Comisaría de jurisdicción">
+      <option value="">— Elegir —</option>${lista.map(c => `<option${c === cur ? ' selected' : ''}>${esc(c)}</option>`).join('')}<option value="__otra">Otra (escribir)…</option></select>
+    <input class="txt" id="i_comis_otra" placeholder="Nombre de la comisaría, ej: CRIA.LA MATANZA NORTE 2DA (RAMOS MEJIA)" hidden style="margin-top:4px">
+    <div class="hint">${aviso ? `<span style="color:var(--signal)">${aviso}</span> ` : ''}${!r.f.comisaria && s ? `Sugerida por ${esc(s.why)}.` : ''}</div>`;
+}
 function faltantes(r){
   const m = [], v = visibles(r);
   if (!val(r,'delito')) m.push('Delito'); if (!val(r,'modal')) m.push('Modalidad');
@@ -893,6 +944,7 @@ function renderForm(){
         <button type="button" class="chip${r.f.coord === 'Sin dato' ? ' on' : ''}" data-act="coordSD">Sin dato</button></div>
       <input id="i_pegar" class="txt mono" style="margin-top:5px" placeholder="Pegar coordenadas: -34.64274, -58.57752" value="${r.f.coord === 'Corregida' && r.f.lat1 != null ? r.f.lat1 + ', ' + r.f.lon1 : ''}">
     </div></div>` : ''}
+    <div class="frow"><label>Comisaría</label><div>${comisariaHTML(r)}</div></div>
     ${v.autores ? `<div class="frow hd"><label>Autores</label>${chips(r, 'naut', L.naut)}</div>
       <div class="frow"><label>Se movían</label>${chips(r, 'movil', L.movil)}</div>
       <div class="frow"><label>Sexo autores</label>${chips(r, 'asexo', L.asexo)}</div>
@@ -965,6 +1017,7 @@ function persistir(r){ r.f.ts = new Date().toISOString().slice(0,16).replace('T'
 function aplicarSugerencias(r){
   const v = visibles(r);
   for (const k of ['delito','modal']) if (!r.f[k] && (sug(r,k)||{}).v) r.f[k] = sug(r,k).v;
+  if (!r.f.comisaria && (sug(r,'comisaria')||{}).v) r.f.comisaria = sug(r,'comisaria').v;
   const keys = [...(v.autores ? ['naut','movil','desc','asexo','amenor'] : []), ...(v.victima ? ['vsexo','vedad'] : []), ...(v.arma ? ['arma'] : []), ...(v.ingreso ? ['ingreso'] : []), ...(v.obj ? ['obj'] : []), ...(v.veh ? ['tveh','vehiculo','dom'] : []), ...(v.estadoh ? ['estadoh'] : []), 'aprh'];
   for (const k of keys) if (!r.f[k] && (sug(r,k)||{}).v) r.f[k] = sug(r,k).v;
   if (!r.fecha && !r.f.fecha1 && (sug(r,'fecha')||{}).v) r.f.fecha1 = sug(r,'fecha').v;
@@ -1079,10 +1132,11 @@ function entornoNarco(geo, R){
 }
 let amap = null, aLayers = null, aSel = null;
 function renderAnalisis(){
-  const pend = $('#aPend')?.value ?? '1', R = +($('#aRadio')?.value ?? 300), capa = $('#aCapa')?.value ?? 'puntos', fd = $('#aDel')?.value ?? '', ff = $('#aFr')?.value ?? '';
+  const pend = $('#aPend')?.value ?? '1', R = +($('#aRadio')?.value ?? 300), capa = $('#aCapa')?.value ?? 'puntos', fd = $('#aDel')?.value ?? '', ff = $('#aFr')?.value ?? '', fc = $('#aCom')?.value ?? '';
   let base = baseAnalisis({ pend: pend === '1' });
   const A = analizar(base);
-  let geo = A.geo.filter(x => (!fd || val(x.r,'delito') === fd) && (!ff || franjaDe(x.r) === ff));
+  let geo = A.geo.filter(x => (!fd || val(x.r,'delito') === fd) && (!ff || franjaDe(x.r) === ff) && (!fc || val(x.r,'comisaria') === fc));
+  const comisAll = [...new Set(base.map(r => val(r,'comisaria')).filter(Boolean))].sort();
   const N = entornoNarco(A.geo, R / 1000);
   const cnt = {}; geo.forEach(x => { const d = val(x.r,'delito'); cnt[d] = (cnt[d]||0)+1; });
   const conCruce = A.cruces.filter(c => c.robo && c.hall);
@@ -1093,16 +1147,21 @@ function renderAnalisis(){
       <select id="aCapa" aria-label="Capa"><option value="puntos"${capa==='puntos'?' selected':''}>Puntos por delito</option><option value="calor"${capa==='calor'?' selected':''}>Mapa de calor</option></select>
       <select id="aDel" aria-label="Delito"><option value="">Todos los delitos</option>${DELITOS.map(d => `<option${d===fd?' selected':''}>${d}</option>`).join('')}</select>
       <select id="aFr" aria-label="Franja"><option value="">Todas las franjas</option>${FRANJAS.map(f => `<option${f===ff?' selected':''}>${f}</option>`).join('')}</select>
+      <select id="aCom" aria-label="Comisaría" style="grid-column:1/3"><option value="">Todas las comisarías</option>${comisAll.map(c => `<option${c===fc?' selected':''}>${esc(c)}</option>`).join('')}</select>
     </div>
     <div class="lgd" style="margin-top:8px">${DELITOS.filter(d => cnt[d]).map(d => `<span><i style="background:${COLOR[d]}"></i>${d} ${cnt[d]}</span>`).join('')}</div>
     <p class="hint">${pend==='1' ? 'Los pendientes se cuentan con los valores sugeridos.' : ''} ${base.length - A.geo.length} hechos sin ubicación no aparecen en el mapa.</p>
 
     <h3>Posibles series (bandas) · ${A.series.length}</h3>
     ${A.series.length ? A.series.slice(0, 30).map(s => `<div class="serie ${SERIES_EST[s.key] === 'Confirmada' ? 'conf' : SERIES_EST[s.key] === 'Descartada' ? 'desc' : ''}" data-serie="${esc(s.key)}">
-      <b>${esc(s.tipo)} · ${s.items.length} hechos</b><p>${esc(s.zona)} · ${fmtF(s.desde)} a ${fmtF(s.hasta)}</p><p>En común: ${esc(s.rasgos || '—')}</p>
+      <b>${esc(s.tipo)} · ${s.items.length} hechos</b>${new Set(s.items.map(r => val(r,'comisaria')).filter(Boolean)).size > 1 ? ' <span class="flag warn">CRUZA JURISDICCIONES</span>' : ''}<p>${esc(s.zona)} · ${fmtF(s.desde)} a ${fmtF(s.hasta)}</p>
+      <p>${esc([...new Set(s.items.map(r => val(r,'comisaria')).filter(Boolean))].join(' · '))}</p><p>En común: ${esc(s.rasgos || '—')}</p>
       <p>N° ${s.items.map(r => r.n).join(', ')}</p>
       <div class="seg" style="margin-top:5px"><button class="chip${SERIES_EST[s.key]==='Confirmada'?' on':''}" data-sest="Confirmada" data-k="${esc(s.key)}">Confirmar</button><button class="chip${SERIES_EST[s.key]==='Descartada'?' on':''}" data-sest="Descartada" data-k="${esc(s.key)}">Descartar</button></div></div>`).join('')
       : '<p class="hint">Todavía no hay grupos de 3 o más hechos parecidos. Aparecen a medida que se cargan semanas y se completan autores, movilidad, arma e ingreso.</p>'}
+
+    <h3>Por comisaría</h3>
+    ${porComisariaHTML(base, A)}
 
     <h3>A quién le roban</h3>
     ${victimasHTML(A.geo.map(x => x.r).concat(base.filter(r => !latlon(r))))}
@@ -1121,6 +1180,16 @@ function renderAnalisis(){
     ${A.cruces.length ? `<table class="t"><tr><th>Dominio</th><th>Robado</th><th>Hallado</th><th>Resultado</th></tr>${A.cruces.slice(0, 40).map(c => `<tr class="cl" data-cruce="${esc(c.dom)}"><td class="mono">${esc(c.dom)}<br><span class="hint">${esc(c.veh)}</span></td><td>${c.robo ? fmtF(fechaFinal(c.robo)) + '<br>' + esc(c.robo.localidad) : '—'}</td><td>${c.hall ? fmtF(fechaFinal(c.hall)) + '<br>' + esc(c.hall.localidad) : '—'}</td><td>${esc(c.resultado)}${c.dist != null ? `<br><span class="hint">${c.dist.toFixed(1)} km</span>` : ''}</td></tr>`).join('')}</table>` : '<p class="hint">Sin dominios cargados todavía.</p>'}
   `;
   pintarMapa(geo, A, N, R, capa);
+}
+function porComisariaHTML(base, A){
+  const g = {};
+  for (const r of base) { const c = val(r,'comisaria') || 'Sin comisaría'; const x = (g[c] ||= { n:0, robo:0, auto:0, narco:0, mod:{}, series:0 }); x.n++;
+    const d = val(r,'delito'); if (d === 'ROBO') x.robo++; if (d === 'AUTOMOTOR') x.auto++; if (d === 'NARCOMENUDEO') x.narco++; const m = val(r,'modal'); if (m) x.mod[m] = (x.mod[m] || 0) + 1; }
+  A.series.forEach(s => new Set(s.items.map(r => val(r,'comisaria') || 'Sin comisaría')).forEach(c => g[c] && g[c].series++));
+  const filas = Object.entries(g).sort((a,b) => b[1].n - a[1].n);
+  if (!filas.length) return '<p class="hint">Sin datos.</p>';
+  return `<div style="max-height:320px;overflow:auto"><table class="t"><tr><th>Comisaría</th><th>Hechos</th><th>Robos</th><th>Autom.</th><th>Narco</th><th>Series</th><th>Más frecuente</th></tr>${filas.map(([c,x]) => `<tr class="cl" data-com="${esc(c)}"><td>${esc(c.replace(/^CRIA\./,''))}</td><td>${x.n}</td><td>${x.robo}</td><td>${x.auto}</td><td>${x.narco}</td><td>${x.series || ''}</td><td>${esc(Object.entries(x.mod).sort((a,b)=>b[1]-a[1])[0]?.[0] || '')}</td></tr>`).join('')}</table></div>
+    <p class="hint">Clic en una comisaría para filtrar el mapa. En los pendientes se usa la comisaría sugerida.</p>`;
 }
 function victimasHTML(rs){
   const g = {};
@@ -1191,7 +1260,8 @@ function irTab(t){
 
 /* ===================== eventos ===================== */
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-f],[data-act],.item,[data-tab],[data-serie],[data-sest],[data-radio],[data-goto],[data-cruce],[data-paq],[data-consulta]'); if (!t) return;
+  const t = e.target.closest('[data-f],[data-act],.item,[data-tab],[data-serie],[data-sest],[data-radio],[data-goto],[data-cruce],[data-paq],[data-consulta],[data-com]'); if (!t) return;
+  if (t.dataset.com) { const sel = $('#aCom'); if (sel) { sel.value = t.dataset.com === 'Sin comisaría' ? '' : t.dataset.com; renderAnalisis(); } return; }
   if (t.dataset.paq) return descargarPaquete(+t.dataset.paq);
   if (t.dataset.consulta) return verConsulta(t.dataset.consulta);
   if (t.dataset.tab) return irTab(t.dataset.tab);
@@ -1229,7 +1299,13 @@ document.addEventListener('input', e => {
   if (k === 'dom') { const c = $('#cruce'); if (c) c.innerHTML = cruceDominio(r); }
 });
 document.addEventListener('change', e => {
-  if (['aPend','aCapa','aDel','aFr'].includes(e.target.id)) return renderAnalisis();
+  if (e.target.dataset?.sel === 'comisaria') { const r = RECS.get(CUR); if (!r) return;
+    if (e.target.value === '__otra') { const i = $('#i_comis_otra'); i.hidden = false; i.focus(); return; }
+    r.f.comisaria = e.target.value; e.target.classList.remove('sug'); persistir(r); return; }
+  if (e.target.id === 'i_comis_otra') { const r = RECS.get(CUR), v = e.target.value.trim().toUpperCase(); if (!r || !v) return;
+    const extra = lsGet(MODO + '_rd_comis_extra', {}); (extra[r.partido] ||= []).includes(v) || extra[r.partido].push(v); lsSet(MODO + '_rd_comis_extra', extra); _comis = null;
+    r.f.comisaria = v; persistir(r); const sc = $('.fbody').scrollTop; renderForm(); $('.fbody').scrollTop = sc; toast('Comisaría agregada a la lista de ' + r.partido + '.'); return; }
+  if (['aPend','aCapa','aDel','aFr','aCom'].includes(e.target.id)) return renderAnalisis();
   if (e.target.id === 'i_pegar') { const p = parsearCoord(e.target.value); if (!p) return toast('No reconozco esas coordenadas. Formato: -34.64274, -58.57752'); setCoord(+p[0].toFixed(6), +p[1].toFixed(6), false); if (map) map.setView(p, 17); }
   if (e.target.dataset?.in === 'fecha1' || e.target.dataset?.in === 'hora1') { const r = RECS.get(CUR); if (r) { const sc = $('.fbody').scrollTop; renderForm(); $('.fbody').scrollTop = sc; } }
 });
