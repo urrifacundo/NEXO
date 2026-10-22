@@ -997,7 +997,7 @@ function initMap(r){
     if (map) { map.remove(); map = null; }
     const b = BOX[r.partido], ll = r.f.coord === 'Corregida' && r.f.lat1 != null ? [r.f.lat1, r.f.lon1] : (r.chk === 'OK' ? [r.lat0, r.lon0] : null);
     map = L.map(el, { zoomControl:true }).setView(ll || (b ? [(b[0]+b[1])/2, (b[2]+b[3])/2] : [-34.7,-58.5]), ll ? 16 : 12);
-    const calles = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19, subdomains:'abcd', attribution:'© OpenStreetMap · © CARTO' });
+    const calles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'© OpenStreetMap' });
     const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom:19, attribution:'© Esri' });
     calles.addTo(map); L.control.layers({ 'Calles':calles, 'Satélite':sat }, null, { position:'topright' }).addTo(map);
     if (r.chk === 'OK' && r.f.coord === 'Corregida') L.circleMarker([r.lat0, r.lon0], { radius:6, color:'#666', fillColor:'#aaa', fillOpacity:.7, weight:1.5 }).addTo(map).bindTooltip('Punto del sistema');
@@ -1319,9 +1319,9 @@ function pintarMapa2(geo, A, N, R, capa){
   if (!window.L) { el.innerHTML = '<p style="padding:20px;color:var(--muted)">Mapa no disponible sin conexión a internet.</p>'; return; }
   if (!amap) {
     amap = L.map(el, { preferCanvas:true }).setView([-34.70, -58.48], 11);
-    const calles = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19, subdomains:'abcd', attribution:'© OpenStreetMap · © CARTO' });
-    const claro = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom:19, subdomains:'abcd', attribution:'© OpenStreetMap · © CARTO' });
-    claro.addTo(amap); L.control.layers({ 'Claro':claro, 'Calles':calles }, null, { position:'topright' }).addTo(amap);
+    const calles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'© OpenStreetMap' });
+    const claro = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom:16, attribution:'© Esri' });
+    calles.addTo(amap); L.control.layers({ 'Calles':calles, 'Gris claro':claro, 'Satélite':L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom:19, attribution:'© Esri' }) }, null, { position:'topright' }).addTo(amap);
   }
   if (aLayers) aLayers.remove();
   aLayers = L.layerGroup().addTo(amap);
