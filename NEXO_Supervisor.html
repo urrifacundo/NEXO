@@ -200,7 +200,7 @@ body.sup .tabs,body.sup #vCarga,body.sup .op-only{display:none!important}
 <body>
 
 <section id="scrSetup" class="screen" hidden>
-  <div class="hero"><svg class="logo big" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#1D4A73"/><path d="M18 46V18L46 46V18" fill="none" stroke="#9CC3E6" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="18" cy="46" r="6" fill="#fff"/><circle cx="18" cy="18" r="6" fill="#fff"/><circle cx="46" cy="18" r="6" fill="#fff"/><circle cx="32" cy="32" r="5" fill="#fff"/><circle cx="46" cy="46" r="11" fill="none" stroke="#F8B26A" stroke-width="1.6"/><circle cx="46" cy="46" r="7.5" fill="#F08A24"/></svg><h1>NEXO · SUPERVISOR</h1></div>
+  <div class="hero"><svg class="logo big" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#1D4A73"/><path d="M18 46V18L46 46V18" fill="none" stroke="#9CC3E6" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="18" cy="46" r="6" fill="#fff"/><circle cx="18" cy="18" r="6" fill="#fff"/><circle cx="46" cy="18" r="6" fill="#fff"/><circle cx="32" cy="32" r="5" fill="#fff"/><circle cx="46" cy="46" r="11" fill="none" stroke="#F8B26A" stroke-width="1.6"/><circle cx="46" cy="46" r="7.5" fill="#F08A24"/></svg><h1>NEXO · SUPERVISOR</h1></div><p class="hint" style="margin:-2px 0 8px">Versión 22/10 · mapas OpenStreetMap</p>
   <p class="lead">Cargá el Excel crudo de la semana: NEXO arma un paquete para cada operadora con solo sus hechos útiles. Cuando te devuelvan su avance, importalo para ver el análisis de los 6 partidos.</p>
   <div class="step">
     <h2>1 · ¿Quién trabaja?</h2>
@@ -999,7 +999,9 @@ function initMap(r){
     map = L.map(el, { zoomControl:true }).setView(ll || (b ? [(b[0]+b[1])/2, (b[2]+b[3])/2] : [-34.7,-58.5]), ll ? 16 : 12);
     const calles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'© OpenStreetMap' });
     const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom:19, attribution:'© Esri' });
-    calles.addTo(map); L.control.layers({ 'Calles':calles, 'Satélite':sat }, null, { position:'topright' }).addTo(map);
+    const capasF = { 'Calles':calles, 'Satélite':sat }; (capasF[lsGet(MODO + '_rd_fondo_ficha', 'Calles')] || calles).addTo(map);
+    L.control.layers(capasF, null, { position:'topright' }).addTo(map);
+    map.on('baselayerchange', e => lsSet(MODO + '_rd_fondo_ficha', e.name));
     if (r.chk === 'OK' && r.f.coord === 'Corregida') L.circleMarker([r.lat0, r.lon0], { radius:6, color:'#666', fillColor:'#aaa', fillOpacity:.7, weight:1.5 }).addTo(map).bindTooltip('Punto del sistema');
     if (ll) mk = L.circleMarker(ll, { radius:9, color:'#B85A00', fillColor:'#F08A24', fillOpacity:.9, weight:2 }).addTo(map).bindTooltip('Lugar del hecho');
     map.on('click', e => setCoord(+e.latlng.lat.toFixed(6), +e.latlng.lng.toFixed(6), true));
@@ -1321,7 +1323,10 @@ function pintarMapa2(geo, A, N, R, capa){
     amap = L.map(el, { preferCanvas:true }).setView([-34.70, -58.48], 11);
     const calles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'© OpenStreetMap' });
     const claro = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom:16, attribution:'© Esri' });
-    calles.addTo(amap); L.control.layers({ 'Calles':calles, 'Gris claro':claro, 'Satélite':L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom:19, attribution:'© Esri' }) }, null, { position:'topright' }).addTo(amap);
+    const capasA = { 'Calles':calles, 'Gris claro':claro, 'Satélite':L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom:19, attribution:'© Esri' }) };
+    (capasA[lsGet(MODO + '_rd_fondo_analisis', 'Calles')] || calles).addTo(amap);
+    L.control.layers(capasA, null, { position:'topright' }).addTo(amap);
+    amap.on('baselayerchange', e => lsSet(MODO + '_rd_fondo_analisis', e.name));
   }
   if (aLayers) aLayers.remove();
   aLayers = L.layerGroup().addTo(amap);
