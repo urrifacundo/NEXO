@@ -1146,6 +1146,16 @@ function analizar(base){
   cruces.sort((a,b) => (b.robo && b.hall ? 1 : 0) - (a.robo && a.hall ? 1 : 0));
   return { geo, series, cruces };
 }
+// Hecho violento: armas, heridos, homicidios, robos con arma, asaltos de vehículo, entraderas y asaltos en vivienda, privación de la libertad
+function esViolento(x){
+  const d = val(x.r,'delito'), m = val(x.r,'modal'), a = val(x.r,'arma');
+  if (d === 'ARMAS' || d === 'HOMICIDIO') return true;
+  if (d === 'ROBO' && (a === 'Fuego' || a === 'Blanca' || ['Entradera','Asalto en vivienda'].includes(m))) return true;
+  if (d === 'AUTOMOTOR' && m === 'Asalto') return true;
+  if (d === 'OTROS GRAVES' && m !== 'Usurpación') return true;
+  return false;
+}
+const cuadras = m => Math.max(1, Math.round(m / 100));
 function entornoNarco(geo, R){
   const puntos = geo.filter(x => val(x.r,'delito') === 'NARCOMENUDEO'), otros = geo.filter(x => val(x.r,'delito') !== 'NARCOMENUDEO');
   if (!puntos.length || otros.length < 10) return null;
@@ -1170,7 +1180,8 @@ function entornoNarco(geo, R){
   const esHerido = x => val(x.r,'delito') === 'HOMICIDIO' || val(x.r,'modal') === 'Herido de arma de fuego';
   const esRobo = x => val(x.r,'delito') === 'ROBO' || (val(x.r,'delito') === 'AUTOMOTOR' && val(x.r,'modal') === 'Asalto');
   grupos.forEach((g, i) => { g.i = i; g.cerca = otros.filter(x => km(g.ll[0], g.ll[1], x.ll[0], x.ll[1]) <= R);
-    g.robos = g.cerca.filter(esRobo).length; g.armas = g.cerca.filter(esArma).length; g.heridos = g.cerca.filter(esHerido).length; });
+    g.robos = g.cerca.filter(esRobo).length; g.armas = g.cerca.filter(esArma).length; g.heridos = g.cerca.filter(esHerido).length;
+    g.violentos = g.cerca.filter(esViolento); g.alerta = g.heridos >= 1 || g.violentos.length >= 2; });
   grupos.sort((a,b) => b.armas - a.armas || b.robos - a.robos || b.cerca.length - a.cerca.length);
   const arm = otros.filter(esArma), armCerca = arm.filter(cerca).length;
   const violencia = arm.length >= 3 && shareArea ? { n: arm.length, cerca: armCerca, ratio: (armCerca / arm.length) / shareArea } : null;
@@ -1189,6 +1200,7 @@ function renderAnalisis(){
   const cnt = {}; geo.forEach(x => { const d = val(x.r,'delito'); cnt[d] = (cnt[d]||0)+1; });
   const conCruce = A.cruces.filter(c => c.robo && c.hall);
   $('#aside').innerHTML = `<div class="seg" style="margin-bottom:10px"><button class="btn primary sm" data-informe="pdf">Descargar informe PDF</button><button class="btn sm" data-informe="word">Descargar informe Word</button></div>` + (MODO === 'supervisor' ? avanceHTML() : '') + `
+    ${alertasHTML(N, R)}
     <h3>Qué se muestra</h3>
     <div class="afil">
       <select id="aPend" aria-label="Registros"><option value="1"${pend==='1'?' selected':''}>Completos + pendientes</option><option value="0"${pend==='0'?' selected':''}>Solo completos</option></select>
@@ -1217,7 +1229,7 @@ function renderAnalisis(){
     ${victimasHTML(A.geo.map(x => x.r).concat(base.filter(r => !latlon(r))))}
 
     <h3>Entorno de puntos de venta de droga</h3>
-    <div class="seg" style="margin-bottom:6px">${[200,300,500].map(x => `<button class="chip${R===x?' on':''}" data-radio="${x}">${x} m</button>`).join('')}<input type="hidden" id="aRadio" value="${R}"></div>
+    <div class="seg" style="margin-bottom:6px">${[200,300,500].map(x => `<button class="chip${R===x?' on':''}" data-radio="${x}">${cuadras(x)} cuadras (${x} m)</button>`).join('')}<input type="hidden" id="aRadio" value="${R}"></div>
     ${N ? `<div class="hallazgo-txt">${N.ratio ? `A menos de ${R} m de los <strong>${N.puntos}</strong> puntos de venta denunciados ocurre el <strong>${(N.shareHechos*100).toFixed(0)}%</strong> de los otros hechos, en el <strong>${(N.shareArea*100).toFixed(0)}%</strong> de la superficie: <strong>${N.ratio.toFixed(1)} veces</strong> más concentración que en el resto de la zona.` : ''}</div>
       <table class="t" style="margin-top:8px"><tr><th>Modalidad</th><th>Cerca</th><th>Lejos</th><th>% cerca</th></tr>
       ${Object.entries(N.porMod).filter(([,v]) => v[0]+v[1] >= 5).sort((a,b) => b[1][0]/(b[1][0]+b[1][1]) - a[1][0]/(a[1][0]+a[1][1])).slice(0,10).map(([k,v]) => `<tr><td>${esc(k)}</td><td>${v[0]}</td><td>${v[1]}</td><td>${Math.round(100*v[0]/(v[0]+v[1]))}%</td></tr>`).join('')}</table>
@@ -1278,6 +1290,7 @@ function informe(tipo){
   ${mapa ? `<h2>Mapa de hechos</h2>${mapa}` : ''}
   <h2>Robos y automotores por franja horaria y día</h2>
   <table class="t"><tr><th>Franja</th>${dias.map(d => `<th>${d.slice(0,3)}</th>`).join('')}</tr>${FRANJAS.map(f => `<tr><td>${f}</td>${dias.map(d => celda(fx[f + '|' + d])).join('')}</tr>`).join('')}</table>
+  ${N ? `<h2>Alertas: venta de droga con violencia cerca · ${N.grupos.filter(g => g.alerta).length}</h2>${N.grupos.filter(g => g.alerta).length ? `<table class="t"><tr><th>Punto de venta</th><th>Denuncias</th><th>Violentos cerca</th><th>Heridos / homicidios</th><th>Comisaría</th></tr>${N.grupos.filter(g => g.alerta).sort((a,b) => b.heridos - a.heridos || b.violentos.length - a.violentos.length).map(g => `<tr><td>${esc(g.miembros[0].r.localidad)} · ${esc(g.miembros[0].r.calle)} ${esc(g.miembros[0].r.altura)}</td><td>${g.miembros.length}</td><td>${g.violentos.length}</td><td>${g.heridos || ''}</td><td>${esc(val(g.miembros[0].r,'comisaria').replace(/^CRIA\./,''))}</td></tr>`).join('')}</table><p class="hint">Radio: ${cuadras(R)} cuadras (${R} m).</p>` : '<p>Sin alertas.</p>'}` : ''}
   <h2>Posibles series (bandas) · ${series.length}</h2>
   ${series.length ? series.map((x, i) => `<div class="serie"><b>${i + 1}. ${esc(x.tipo)} · ${x.items.length} hechos</b>${SERIES_EST[x.key] === 'Confirmada' ? ' · <b style="color:#2C7A4B">CONFIRMADA</b>' : ''}${new Set(x.items.map(r => val(r,'comisaria')).filter(Boolean)).size > 1 ? ' · <b style="color:#B8620F">CRUZA JURISDICCIONES</b>' : ''}<br>
     ${esc(x.zona)} · del ${fmtF(x.desde)} al ${fmtF(x.hasta)}<br>En común: ${esc(x.rasgos || '—')}<br>Comisarías: ${esc([...new Set(x.items.map(r => val(r,'comisaria')).filter(Boolean))].join(' · ') || '—')}<br>
@@ -1296,7 +1309,14 @@ function informe(tipo){
     .sub{color:#5A6470;font-size:9.5pt}.t{border-collapse:collapse;width:100%;font-size:9.5pt;margin:4px 0}.t th{background:#DCE7F1;text-align:left;padding:4px 6px;border:1px solid #BFC9D4}.t td{padding:4px 6px;border:1px solid #D4D9D2;vertical-align:top}
     .hint{color:#5A6470;font-size:9pt}.serie{border:1px solid #D4D9D2;border-radius:6px;padding:7px 9px;margin:0 0 7px;font-size:10pt;page-break-inside:avoid}.flag{font-weight:bold}h2{page-break-after:avoid}table{page-break-inside:auto}tr{page-break-inside:avoid}
     @page{margin:15mm}`;
-  const nombre = `NEXO_informe_${todayISO()}`;
+  descargarInforme(html, `NEXO_informe_${todayISO()}`, tipo);
+}
+const CSS_INFORME = `body{font-family:Arial,Helvetica,sans-serif;color:#17202A;font-size:11pt;margin:24px}h1{font-size:20pt;color:#1D4A73;margin:0 0 4px}h2{font-size:13pt;color:#1D4A73;border-bottom:1.5px solid #1D4A73;padding-bottom:3px;margin:22px 0 8px}h3{font-size:11pt;margin:14px 0 6px}
+    .sub{color:#5A6470;font-size:9.5pt}.t{border-collapse:collapse;width:100%;font-size:9.5pt;margin:4px 0}.t th{background:#DCE7F1;text-align:left;padding:4px 6px;border:1px solid #BFC9D4}.t td{padding:4px 6px;border:1px solid #D4D9D2;vertical-align:top}
+    .hint{color:#5A6470;font-size:9pt}.serie{border:1px solid #D4D9D2;border-radius:6px;padding:7px 9px;margin:0 0 7px;font-size:10pt;page-break-inside:avoid}.flag{font-weight:bold}h2{page-break-after:avoid}table{page-break-inside:auto}tr{page-break-inside:avoid}
+    @page{margin:15mm}`;
+function descargarInforme(html, nombre, tipo){
+  const css = CSS_INFORME;
   if (tipo === 'word') {
     const doc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${nombre}</title><style>${css}</style></head><body>${html}</body></html>`;
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff', doc], { type:'application/msword' })); a.download = nombre + '.doc'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
@@ -1318,6 +1338,49 @@ function mapaSVG(geo){
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H + 30}" width="100%" style="border:1px solid #D4D9D2;background:#F7F8F6"><rect width="${W}" height="${H}" fill="#F7F8F6"/>${pts}
     ${usados.map((d, i) => `<circle cx="${24 + i * 86}" cy="${H + 14}" r="5" fill="${COLOR[d]}"/><text x="${32 + i * 86}" y="${H + 18}" font-size="10" font-family="Arial" fill="#17202A">${d.slice(0, 12)}</text>`).join('')}</svg>
     <p class="hint">Cada punto es un hecho, sin mapa de fondo. Para ver calles y zonas, usá el mapa de NEXO Supervisor.</p>`;
+}
+function alertasHTML(N, R){
+  if (!N) return '';
+  const al = N.grupos.filter(g => g.alerta).sort((a,b) => b.heridos - a.heridos || b.violentos.length - a.violentos.length);
+  return `<h3 style="color:var(--bad)">Alertas: venta de droga con violencia cerca · ${al.length}</h3>
+    <p class="hint" style="margin:0 0 6px">Puntos de venta con al menos un herido u homicidio, o 2 o más hechos violentos, a menos de ${cuadras(R)} cuadras (${R} m). El radio se cambia más abajo, en “Entorno de puntos de venta”.</p>
+    ${al.length ? al.slice(0, 15).map(g => { const p = g.miembros[0].r; const f = {}; g.violentos.forEach(x => { const k = val(x.r,'modal') || val(x.r,'delito'); f[k] = (f[k] || 0) + 1; });
+      return `<div class="serie" style="border-color:var(--bad)"><b>${esc(p.localidad)} · ${esc(p.calle)} ${esc(p.altura)}</b>${g.heridos ? ` <span class="flag bad">${g.heridos} HERIDO${g.heridos > 1 ? 'S' : ''} / HOMICIDIO</span>` : ''}
+        <p>${g.miembros.length} denuncia${g.miembros.length > 1 ? 's' : ''} de venta · <b>${g.violentos.length}</b> hecho${g.violentos.length > 1 ? 's' : ''} violento${g.violentos.length > 1 ? 's' : ''} alrededor: ${esc(Object.entries(f).sort((a,b)=>b[1]-a[1]).map(([k,n]) => n + ' ' + k.toLowerCase()).join(', '))}</p>
+        <p>${esc(val(p,'comisaria').replace(/^CRIA\./,''))}</p>
+        <div class="seg" style="margin-top:5px"><button class="chip" data-foconarco="${g.i}">Ver en el mapa</button><button class="chip" data-informepunto="${g.i}" data-tipo="pdf">Informe PDF</button><button class="chip" data-informepunto="${g.i}" data-tipo="word">Informe Word</button></div></div>`; }).join('')
+      : '<p class="hint">Sin alertas con los datos actuales.</p>'}`;
+}
+function informePunto(i, tipo){
+  const N = LAST_N, R = +($('#aRadio')?.value ?? 300); const g = N && N.grupos.find(x => x.i === i); if (!g) return;
+  const p = g.miembros[0].r, dist = x => Math.round(km(g.ll[0], g.ll[1], x.ll[0], x.ll[1]) * 1000);
+  const ord = arr => [...arr].sort((a,b) => (fechaFinal(b.r) || '').localeCompare(fechaFinal(a.r) || ''));
+  const filaH = x => `<tr><td>N° ${x.r.n}<br><span class="hint">IPP ${esc(x.r.ipp)}</span></td><td>${fmtF(fechaFinal(x.r))} ${esc(horaFinal(x.r) || '')}</td><td>${esc([val(x.r,'delito'), val(x.r,'modal')].filter(Boolean).join(' · '))}</td><td>${esc(val(x.r,'arma') || '')}</td><td>${esc(x.r.calle)} ${esc(x.r.altura)}</td><td>${dist(x) < 50 ? 'Misma cuadra' : cuadras(dist(x)) + ' cuadra' + (cuadras(dist(x)) > 1 ? 's' : '')} (${dist(x)} m)</td></tr>`;
+  const resto = g.cerca.filter(x => !g.violentos.includes(x)), cntR = {}; resto.forEach(x => { const k = val(x.r,'delito') + ' · ' + val(x.r,'modal'); cntR[k] = (cntR[k] || 0) + 1; });
+  const html = `<h1>NEXO · Informe de punto de venta</h1>
+  <p class="sub">${esc(p.localidad)} · ${esc(p.calle)} ${esc(p.altura)}${p.entre ? ' y ' + esc(p.entre) : ''} · ${esc(p.partido)}<br>Comisaría: ${esc(val(p,'comisaria') || '—')} · Radio analizado: ${cuadras(R)} cuadras (${R} m)<br>Generado el ${new Date().toLocaleString('es-AR')} por ${esc(OP.nombre)}</p>
+  <h2>Resumen</h2>
+  <p><b>${g.miembros.length}</b> denuncia${g.miembros.length > 1 ? 's' : ''} de venta de estupefacientes en el punto. A menos de ${cuadras(R)} cuadras ${g.cerca.length === 1 ? 'ocurrió <b>1</b> hecho' : `ocurrieron <b>${g.cerca.length}</b> hechos`}, ${g.violentos.length === 1 ? 'de los cuales <b>1</b> fue violento' : `de los cuales <b>${g.violentos.length}</b> fueron violentos`}${g.heridos ? `, con <b>${g.heridos}</b> herido(s) u homicidio(s)` : ''}.</p>
+  ${tipo === 'pdf' ? mapaPuntoSVG(g, R) : ''}
+  <h2>Denuncias de venta</h2>
+  <table class="t"><tr><th>N°</th><th>Fecha</th><th>Modalidad</th><th>Dirección</th><th>Resumen</th></tr>${ord(g.miembros).map(m => `<tr><td>N° ${m.r.n}<br><span class="hint">IPP ${esc(m.r.ipp)}</span></td><td>${fmtF(fechaFinal(m.r))}</td><td>${esc(val(m.r,'modal'))}</td><td>${esc(m.r.calle)} ${esc(m.r.altura)}</td><td>${esc(m.r.ia?.resumen || val(m.r,'desc') || String(m.r.relato || '').slice(0, 260) + (String(m.r.relato || '').length > 260 ? '…' : ''))}</td></tr>`).join('')}</table>
+  <h2>Hechos violentos alrededor · ${g.violentos.length}</h2>
+  ${g.violentos.length ? `<table class="t"><tr><th>N°</th><th>Fecha y hora</th><th>Hecho</th><th>Arma</th><th>Dirección</th><th>Distancia</th></tr>${ord(g.violentos).map(filaH).join('')}</table>` : '<p>Ninguno.</p>'}
+  <h2>Otros hechos alrededor · ${resto.length}</h2>
+  ${resto.length ? `<table class="t"><tr><th>Hecho</th><th>Cantidad</th></tr>${Object.entries(cntR).sort((a,b)=>b[1]-a[1]).map(([k,n]) => `<tr><td>${esc(k)}</td><td>${n}</td></tr>`).join('')}</table>` : '<p>Ninguno.</p>'}
+  <p class="hint">La cercanía entre un punto de venta y los hechos violentos es una asociación: no prueba que estén relacionados. Sirve para orientar la investigación.</p>`;
+  descargarInforme(html, `NEXO_punto_${norm(p.localidad).replace(/[^a-z0-9]+/g,'_')}_${todayISO()}`, tipo);
+}
+function mapaPuntoSVG(g, R){
+  const W = 520, H = 420, esc2 = (W / 2 - 30) / (R * 1.25), cx = W / 2, cy = H / 2 - 8;
+  const X = ll => cx + (ll[1] - g.ll[1]) * 111320 * Math.cos(g.ll[0] * Math.PI / 180) * esc2, Y = ll => cy - (ll[0] - g.ll[0]) * 110570 * esc2;
+  const rings = [R / 2, R].map(r => `<circle cx="${cx}" cy="${cy}" r="${(r * esc2).toFixed(1)}" fill="none" stroke="#2A9D6F" stroke-dasharray="5 5"/><text x="${cx + r * esc2 + 3}" y="${cy - 3}" font-size="10" font-family="Arial" fill="#2A9D6F">${(r / 100).toLocaleString('es-AR')} cdr</text>`).join('');
+  const pts = g.cerca.map(x => `<circle cx="${X(x.ll).toFixed(1)}" cy="${Y(x.ll).toFixed(1)}" r="${g.violentos.includes(x) ? 7 : 4.5}" fill="${COLOR[val(x.r,'delito')] || '#888'}" stroke="${g.violentos.includes(x) ? '#000' : '#fff'}" stroke-width="${g.violentos.includes(x) ? 1.5 : 1}"/>`).join('');
+  const venta = g.miembros.map(m => `<circle cx="${X(m.ll).toFixed(1)}" cy="${Y(m.ll).toFixed(1)}" r="9" fill="#2A9D6F" stroke="#fff" stroke-width="2.5"/>`).join('');
+  const usados = DELITOS.filter(d => g.cerca.some(x => val(x.r,'delito') === d));
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H + 30}" width="80%" style="border:1px solid #D4D9D2;background:#F7F8F6;display:block;margin:6px auto">${rings}${venta}${pts}
+    ${usados.map((d, i) => `<circle cx="${20 + i * 100}" cy="${H + 14}" r="5" fill="${COLOR[d]}"/><text x="${28 + i * 100}" y="${H + 18}" font-size="10" font-family="Arial" fill="#17202A">${d.slice(0, 13)}</text>`).join('')}</svg>
+    <p class="hint" style="text-align:center">Verde grande: punto de venta. Con borde negro: hechos violentos. Círculos: mitad del radio y radio completo. Sin calles de fondo.</p>`;
 }
 function reAnalisis(){ const sc = $('#aside').scrollTop; renderAnalisis(); $('#aside').scrollTop = sc; }
 function avanceHTML(){
@@ -1443,10 +1506,11 @@ function irTab(t){
 
 /* ===================== eventos ===================== */
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-f],[data-act],.item,[data-tab],[data-serie],[data-sest],[data-radio],[data-goto],[data-cruce],[data-paq],[data-consulta],[data-com],[data-informe],[data-foconarco],[data-lg]'); if (!t) return;
+  const t = e.target.closest('[data-f],[data-act],.item,[data-tab],[data-serie],[data-sest],[data-radio],[data-goto],[data-cruce],[data-paq],[data-consulta],[data-com],[data-informe],[data-foconarco],[data-lg],[data-informepunto]'); if (!t) return;
   if (t.dataset.com) { const sel = $('#aCom'); if (sel) { sel.value = t.dataset.com === 'Sin comisaría' ? '' : t.dataset.com; renderAnalisis(); } return; }
   if (t.dataset.paq) return descargarPaquete(+t.dataset.paq);
   if (t.dataset.informe) return informe(t.dataset.informe);
+  if (t.dataset.informepunto != null) return informePunto(+t.dataset.informepunto, t.dataset.tipo);
   if (t.dataset.consulta) return verConsulta(t.dataset.consulta);
   if (t.dataset.tab) return irTab(t.dataset.tab);
   if (t.classList.contains('item')) return seleccionar(t.dataset.id);
