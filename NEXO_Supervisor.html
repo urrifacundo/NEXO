@@ -175,6 +175,14 @@ table.t tr.cl{cursor:pointer} table.t tr.cl:hover{background:var(--accent-soft)}
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:var(--panel);padding:8px 15px;border-radius:7px;font-size:13px;z-index:3000;max-width:90vw}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:2500;padding:16px}
 .modal>div{background:var(--panel);border-radius:10px;padding:18px 20px;max-width:640px;width:100%;max-height:85vh;overflow:auto}
+.modal>div.ancho{max-width:1100px}
+.den{display:grid;grid-template-columns:340px minmax(0,1fr);gap:18px}
+.den table{width:100%;border-collapse:collapse;font-size:12.5px}
+.den td{padding:4px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+.den td:first-child{color:var(--muted);width:42%}
+.nlink{border:0;background:none;color:var(--accent);text-decoration:underline;padding:0 2px;font:inherit;cursor:pointer}
+.pop b{font-size:13px}.pop{font-size:12.5px;line-height:1.45}.pop button{margin-top:6px;border:1px solid #1D4A73;background:#1D4A73;color:#fff;border-radius:5px;padding:3px 9px;font-size:12px;cursor:pointer}
+@media (max-width:900px){.den{grid-template-columns:1fr}}
 
 /* modo operadora: sin lista lateral ni análisis */
 body.op .list,body.op .tabs,body.op .sup-only,body.op .brand span{display:none!important}
@@ -1176,7 +1184,7 @@ function renderAnalisis(){
     ${A.series.length ? A.series.slice(0, 30).map(s => `<div class="serie ${SERIES_EST[s.key] === 'Confirmada' ? 'conf' : SERIES_EST[s.key] === 'Descartada' ? 'desc' : ''}" data-serie="${esc(s.key)}">
       <b>${esc(s.tipo)} · ${s.items.length} hechos</b>${new Set(s.items.map(r => val(r,'comisaria')).filter(Boolean)).size > 1 ? ' <span class="flag warn">CRUZA JURISDICCIONES</span>' : ''}<p>${esc(s.zona)} · ${fmtF(s.desde)} a ${fmtF(s.hasta)}</p>
       <p>${esc([...new Set(s.items.map(r => val(r,'comisaria')).filter(Boolean))].join(' · '))}</p><p>En común: ${esc(s.rasgos || '—')}</p>
-      <p>N° ${s.items.map(r => r.n).join(', ')}</p>
+      <p>N° ${s.items.map(r => `<button class="nlink" onclick="event.stopPropagation();verDenuncia('${esc(r.id)}')">${r.n}</button>`).join(' ')}</p>
       <div class="seg" style="margin-top:5px"><button class="chip${SERIES_EST[s.key]==='Confirmada'?' on':''}" data-sest="Confirmada" data-k="${esc(s.key)}">Confirmar</button><button class="chip${SERIES_EST[s.key]==='Descartada'?' on':''}" data-sest="Descartada" data-k="${esc(s.key)}">Descartar</button></div></div>`).join('')
       : '<p class="hint">Todavía no hay grupos de 3 o más hechos parecidos. Aparecen a medida que se cargan semanas y se completan autores, movilidad, arma e ingreso.</p>'}
 
@@ -1197,7 +1205,7 @@ function renderAnalisis(){
       : '<p class="hint">Hacen falta hechos de narcomenudeo ubicados y al menos 10 hechos de otros delitos.</p>'}
 
     <h3>Vehículos robados y hallados · ${conCruce.length} cruces</h3>
-    ${A.cruces.length ? `<table class="t"><tr><th>Dominio</th><th>Robado</th><th>Hallado</th><th>Resultado</th></tr>${A.cruces.slice(0, 40).map(c => `<tr class="cl" data-cruce="${esc(c.dom)}"><td class="mono">${esc(c.dom)}<br><span class="hint">${esc(c.veh)}</span></td><td>${c.robo ? fmtF(fechaFinal(c.robo)) + '<br>' + esc(c.robo.localidad) : '—'}</td><td>${c.hall ? fmtF(fechaFinal(c.hall)) + '<br>' + esc(c.hall.localidad) : '—'}</td><td>${esc(c.resultado)}${c.dist != null ? `<br><span class="hint">${c.dist.toFixed(1)} km</span>` : ''}</td></tr>`).join('')}</table>` : '<p class="hint">Sin dominios cargados todavía.</p>'}
+    ${A.cruces.length ? `<table class="t"><tr><th>Dominio</th><th>Robado</th><th>Hallado</th><th>Resultado</th></tr>${A.cruces.slice(0, 40).map(c => `<tr class="cl" data-cruce="${esc(c.dom)}"><td class="mono">${esc(c.dom)}<br><span class="hint">${esc(c.veh)}</span></td><td>${c.robo ? `<button class="nlink" onclick="event.stopPropagation();verDenuncia('${esc(c.robo.id)}')">N° ${c.robo.n}</button> ` + fmtF(fechaFinal(c.robo)) + '<br>' + esc(c.robo.localidad) : '—'}</td><td>${c.hall ? `<button class="nlink" onclick="event.stopPropagation();verDenuncia('${esc(c.hall.id)}')">N° ${c.hall.n}</button> ` + fmtF(fechaFinal(c.hall)) + '<br>' + esc(c.hall.localidad) : '—'}</td><td>${esc(c.resultado)}${c.dist != null ? `<br><span class="hint">${c.dist.toFixed(1)} km</span>` : ''}</td></tr>`).join('')}</table>` : '<p class="hint">Sin dominios cargados todavía.</p>'}
   `;
   pintarMapa(geo, A, N, R, capa);
 }
@@ -1302,7 +1310,47 @@ function avanceHTML(){
     <h3>Consultas de las operadoras · ${cons.length}</h3>
     ${cons.length ? `<table class="t">${cons.slice(0, 30).map(r => `<tr class="cl" data-consulta="${esc(r.id)}"><td>N° ${r.n}<br><span class="hint">${esc(r.f.oper || '')}</span></td><td>${esc(r.f.obs || '')}</td></tr>`).join('')}</table>` : '<p class="hint">Sin consultas.</p>'}`;
 }
-function verConsulta(id){
+function popupHTML(r){
+  const com = val(r,'comisaria').replace(/^CRIA\./,'');
+  return `<div class="pop"><b>N° ${r.n} · ${esc(val(r,'delito'))}</b> · ${esc(val(r,'modal'))}<br>${fmtF(fechaFinal(r))} ${esc(horaFinal(r)||'')} · ${esc(r.localidad)}<br>${esc(r.calle)} ${esc(r.altura)}${com ? '<br>' + esc(com) : ''}${r.ia?.resumen ? `<br><i>${esc(r.ia.resumen.slice(0,110))}${r.ia.resumen.length > 110 ? '…' : ''}</i>` : ''}<br><button onclick="verDenuncia('${esc(r.id)}')">Ver denuncia</button></div>`;
+}
+function verDenuncia(id){
+  const r = RECS.get(id); if (!r) return;
+  const est = r.f.estado || 'Pendiente', fila = (k, v, sg) => v ? `<tr><td>${k}</td><td>${sg ? `<span style="color:var(--accent)">${esc(v)}</span>` : esc(v)}</td></tr>` : '';
+  const vv = visibles(r), vis = { arma:vv.arma, naut:vv.autores, movil:vv.autores, asexo:vv.autores, amenor:vv.autores, desc:vv.autores, obj:vv.obj, ingreso:vv.ingreso, tveh:vv.veh, vehiculo:vv.veh, dom:vv.veh, estadoh:vv.estadoh, vsexo:vv.victima, vedad:vv.victima };
+  const dato = (k, campo) => vis[campo] === false && !r.f[campo] ? '' : fila(k, val(r, campo), isSug(r, campo));
+  const dirs = [r.calle, r.altura].filter(Boolean).join(' ') + (r.entre ? ' y ' + r.entre : '');
+  const ll = latlon(r);
+  $('#modalBody').className = 'ancho';
+  $('#modalBody').innerHTML = `<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap">
+      <div><h2 style="margin:0">N° ${r.n} · ${esc(val(r,'delito') || 'Sin clasificar')} · ${esc(val(r,'modal'))}</h2>
+      <p class="hint" style="margin:3px 0 0">IPP ${esc(r.ipp)} · ID ${esc(r.id)} · <span class="flag ${est === 'Completo' ? 'ok' : est === 'Consultar' ? 'warn' : est === 'Descartar' ? 'bad' : 'info'}">${esc(est.toUpperCase())}</span>${r.f.oper ? ' · cargado por ' + esc(r.f.oper) : ''}${r.f.ts ? ' el ' + esc(r.f.ts) : ''}</p></div>
+      <div class="seg">${ll && amap ? `<button class="btn sm" id="btnVerMapa">Ver en el mapa</button>` : ''}<button class="btn primary sm" onclick="document.getElementById('modal').hidden=true">Cerrar</button></div></div>
+    ${r.f.estado === 'Consultar' ? `<div class="ia" style="border-color:var(--signal);background:var(--signal-soft);margin-top:10px"><b class="lab" style="color:var(--signal)">Consulta de ${esc(r.f.oper || 'la operadora')}</b>${esc(r.f.obs || '')}</div>` : ''}
+    <div class="den" style="margin-top:12px">
+      <div><table>
+        ${fila('Fecha y hora', `${fmtF(fechaFinal(r))} ${horaFinal(r) || ''}${r.f.fecha1 || r.f.hora1 ? ' (corregida)' : ''}`)}
+        ${fila('Día / franja', `${diaDe(r)} · ${franjaDe(r)}`)}
+        ${fila('Partido', r.partido)}${fila('Localidad', r.localidad)}${fila('Dirección', dirs)}
+        ${fila('Ubicación', ll ? `${(+ll[0]).toFixed(5)}, ${(+ll[1]).toFixed(5)} (${coordEstado(r)[0].toLowerCase()})` : 'sin ubicación')}
+        ${dato('Comisaría', 'comisaria')}${fila('Tomó la denuncia', r.dep)}${fila('Carátula original', r.cal)}
+        ${dato('Arma', 'arma')}${dato('Autores', 'naut')}${dato('Se movían', 'movil')}${dato('Sexo autores', 'asexo')}${dato('Menores entre autores', 'amenor')}
+        ${dato('Descripción', 'desc')}${dato('Se llevaron', 'obj')}${dato('Forma de ingreso', 'ingreso')}
+        ${dato('Tipo de vehículo', 'tveh')}${dato('Vehículo', 'vehiculo')}${dato('Dominio', 'dom')}${dato('Estado al hallazgo', 'estadoh')}
+        ${dato('Víctima', 'vsexo')}${dato('Edad víctima', 'vedad')}${dato('Aprehendidos', 'aprh')}
+        ${r.f.estado !== 'Consultar' ? fila('Observaciones', r.f.obs) : ''}
+        ${fila('Fecha de carga', fmtF(r.fcarga))}
+      </table>
+      <p class="hint">En azul: valores sugeridos que la operadora todavía no confirmó.</p>
+      ${cruceDominio(r)}</div>
+      <div>${r.ia?.resumen ? `<div class="ia"><b class="lab">Lectura de IA</b>${esc(r.ia.resumen)}</div>` : ''}
+      ${r.relato ? `<div class="relato" style="font-size:13.5px">${resaltar(r.relato)}</div>` : '<p class="hint">El relato no viene en el Excel de avance. Cargá el Excel crudo de esa semana en NEXO Supervisor para verlo acá.</p>'}</div>
+    </div>`;
+  $('#modal').hidden = false; $('#modalBody').scrollTop = 0;
+  const bm = $('#btnVerMapa'); if (bm) bm.onclick = () => { $('#modal').hidden = true; amap.setView(ll, 17); };
+}
+function verConsulta(id){ return verDenuncia(id); }
+function verConsultaVieja(id){
   const r = RECS.get(id); if (!r) return;
   $('#modalBody').innerHTML = `<h2 style="margin-top:0">N° ${r.n} · ${esc(r.localidad)}</h2>
     <p><b>Consulta de ${esc(r.f.oper || 'la operadora')}:</b> ${esc(r.f.obs || '')}</p>
@@ -1332,7 +1380,7 @@ function pintarMapa2(geo, A, N, R, capa){
   aLayers = L.layerGroup().addTo(amap);
   if (capa === 'calor' && L.heatLayer) L.heatLayer(geo.map(x => [x.ll[0], x.ll[1], 0.6]), { radius:18, blur:22, maxZoom:15 }).addTo(aLayers);
   else geo.forEach(x => L.circleMarker(x.ll, { radius:4.5, weight:0.8, color:'#fff', fillColor:COLOR[val(x.r,'delito')] || '#888', fillOpacity:.85 })
-      .bindPopup(`<b>N° ${x.r.n} · ${esc(val(x.r,'delito'))}</b><br>${esc(val(x.r,'modal'))}<br>${fmtF(fechaFinal(x.r))} ${esc(horaFinal(x.r)||'')} · ${esc(x.r.localidad)}`).addTo(aLayers));
+      .bindPopup(() => popupHTML(x.r)).addTo(aLayers));
   if (N) A.geo.filter(x => val(x.r,'delito') === 'NARCOMENUDEO').forEach(x => L.circle(x.ll, { radius:R, color:COLOR.NARCOMENUDEO, weight:1, fillOpacity:.06, dashArray:'4 4', interactive:false }).addTo(aLayers));
   A.cruces.filter(c => c.robo && c.hall && latlon(c.robo) && latlon(c.hall)).forEach(c => L.polyline([latlon(c.robo), latlon(c.hall)], { color:COLOR.AUTOMOTOR, weight:2, dashArray:'6 5', opacity:.8 }).bindTooltip(`${c.dom}: ${c.resultado}`).addTo(aLayers));
   if (aSel) { L.polygon(aSel, { color:'#D1495B', weight:2, fillOpacity:.08 }).addTo(aLayers); }
@@ -1440,7 +1488,7 @@ $('#opIr').addEventListener('keydown', e => { if (e.key !== 'Enter') return; con
 $('#fBuscar').addEventListener('input', renderList);
 $('#btnHome').onclick = () => { guardarTiempo(); renderSetup(); };
 $('#btnExport').onclick = exportar; $('#btnExport2').onclick = exportar;
-$('#btnHelp').onclick = () => {
+$('#btnHelp').onclick = () => { $('#modalBody').className = '';
   $('#modalBody').innerHTML = `<h2 style="margin-top:0">Cómo se trabaja</h2>
   <p style="font-size:13px">A la izquierda, la denuncia completa con la lectura de IA arriba (si el Excel la trae). A la derecha, la ficha ya completada con sugerencias en azul punteado. Revisás, corregís lo que esté mal y guardás.</p>
   <p style="font-size:13px"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> guarda y pasa al siguiente · <kbd>Alt</kbd> + <kbd>→</kbd> / <kbd>←</kbd> cambia de hecho sin guardar.</p>
