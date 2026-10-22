@@ -230,6 +230,16 @@ body.sup .tabs,body.sup #vCarga,body.sup .op-only{display:none!important}
     <p class="hint" style="margin:0 0 10px">Importá el Excel de avance que te mandó cada una (podés elegir varios a la vez). Se suman a lo que ya tenés.</p>
     <label class="btn" for="fileImport">Importar avances</label>
     <input type="file" id="fileImport" accept=".xlsx" multiple hidden>
+    <div class="summary" id="importSummary"></div>
+  </div>
+  <div class="step" style="border-color:var(--bad)">
+    <h2>Empezar de cero</h2>
+    <p class="hint" style="margin:0 0 10px">Borra todo lo guardado en esta computadora: hechos, avances, consultas, series confirmadas y comisarías agregadas. No toca los Excel que tengas guardados. Antes exportá un Excel si querés conservar algo.</p>
+    <button class="btn danger" id="btnBorrar">Borrar todo</button>
+    <div id="borrarBox" hidden style="margin-top:10px">
+      <p style="margin:0 0 6px;font-size:13px">Para confirmar, escribí <b>BORRAR</b> y tocá el botón rojo:</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="borrarTxt" class="txt" style="max-width:180px" autocomplete="off"><button class="btn" id="btnBorrarOk" style="background:var(--bad);color:#fff;border-color:var(--bad)" disabled>Borrar definitivamente</button><button class="btn" id="btnBorrarNo">Cancelar</button></div>
+    </div>
   </div>
 </section>
 
@@ -356,7 +366,7 @@ const MOD = {
 };
 const DELITOS = Object.keys(MOD);
 const COLOR = { 'ROBO':'#D1495B', 'AUTOMOTOR':'#2E6FB7', 'HURTO':'#E8A33D', 'ESTAFA':'#8E5CC2', 'NARCOMENUDEO':'#2A9D6F', 'ARMAS':'#6B4226', 'HOMICIDIO':'#111111', 'OTROS GRAVES':'#7A8590' };
-const L = {
+const LST = {
   arma:['Fuego','Blanca','Sin arma','S/D'], naut:['1','2','3 o más','S/D'], movil:['A pie','Moto','Auto','S/D'],
   obj:['Celular','Dinero','Vehículo','Otro'], ingreso:['Forzaron puerta','Reja o ventana','Al entrar o salir','Engaño','S/D'],
   tveh:['Auto','Camioneta','Moto','Camión'], estadoh:['Entero','Sin partes','Desarmado','Incendiado'], aprh:['No','Sí'],
@@ -726,6 +736,7 @@ function descargarPaquete(i){
   XLSX.writeFile(wb, `Paquete_${norm(a.nombre).replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')}_${todayISO()}.xlsx`);
   toast(`Paquete de ${a.nombre} descargado: ${rows.length} hechos.`);
 }
+function msgImport(m, bad){ $('#importSummary').innerHTML = `<div class="flag ${bad?'bad':'ok'}" style="white-space:normal;font-size:13px">${esc(m)}</div>`; }
 function msgSetup(m, bad){ $('#loadSummary').innerHTML = `<div class="flag ${bad?'bad':'ok'}" style="white-space:normal;font-size:13px">${esc(m)}</div>`; }
 
 /* ===================== exportar / importar ===================== */
@@ -779,8 +790,8 @@ function exportar(){
 async function importarAvance(files){
   let ok = 0, nuevos = 0; const lote = [];
   for (const file of files) {
-    let rows; try { const wb = await leerArchivo(file); rows = filasDe(wb, wb.Sheets['CARGA'] ? 'CARGA' : null); } catch(e){ return msgSetup(e.message || String(e), true); }
-    if (!rows.length || !('ID delito' in rows[0]) || !('DELITO' in rows[0])) return msgSetup(`“${file.name}” no es un Excel exportado desde NEXO.`, true);
+    let rows; try { const wb = await leerArchivo(file); rows = filasDe(wb, wb.Sheets['CARGA'] ? 'CARGA' : null); } catch(e){ return msgImport(e.message || String(e), true); }
+    if (!rows.length || !('ID delito' in rows[0]) || !('DELITO' in rows[0])) return msgImport(`“${file.name}” no es un Excel de avance de NEXO. Si es un paquete o un crudo, cargalo arriba, en el paso 2.`, true);
     for (const x of rows){
       const id = String(x['ID delito']); let r = RECS.get(id);
       if (!r) { const lat = num(x.LAT), lon = num(x.LON), P = normP(x.Partido);
@@ -800,9 +811,16 @@ async function importarAvance(files){
     }
   }
   await dbPut(lote); _comis = null;
-  msgSetup(`${ok} registros importados (${nuevos} nuevos en esta computadora).`, false);
-  $('#loadSummary').insertAdjacentHTML('beforeend', '<div style="margin-top:8px"><button class="btn primary" id="btnGo">Entrar</button></div>');
-  $('#btnGo').onclick = abrirMesa;
+  const tot = { Completo:0, Consultar:0, Descartar:0, Pendiente:0 }, quien = {};
+  for (const r of lote) { const e = r.f.estado || 'Pendiente'; tot[e] = (tot[e] || 0) + 1; if (e !== 'Pendiente' && r.f.oper) quien[r.f.oper] = (quien[r.f.oper] || 0) + 1; }
+  const filas = `<div><b>${tot.Completo}</b> completos · <b>${tot.Consultar}</b> consultas · <b>${tot.Descartar}</b> descartados · <b>${tot.Pendiente}</b> pendientes</div>` +
+    (Object.keys(quien).length ? `<div class="hint">Trabajados por: ${Object.entries(quien).map(([o, n]) => `${esc(o)} (${n})`).join(', ')}</div>` : '');
+  const pend = lote.filter(r => (r.f.estado || 'Pendiente') === 'Pendiente').length;
+  $('#importSummary').innerHTML = `<div class="flag ok" style="font-size:13px;white-space:normal">Avance importado: ${ok} hechos actualizados${nuevos ? ` (${nuevos} que no estaban en esta computadora)` : ''}.</div>${filas}
+    ${pend === ok ? '<div class="flag warn" style="white-space:normal;font-size:12.5px">Ese Excel no trae ningún hecho trabajado. ¿La operadora lo exportó después de cargar? Pedile que toque “Enviar avance” de nuevo.</div>' : ''}
+    <div style="margin-top:8px"><button class="btn primary" id="btnGoImp">Ver análisis</button></div>`;
+  $('#btnGoImp').onclick = abrirMesa;
+  if (OP) { const st = estadisticas(); $('#resumeBox').hidden = false; $('#resumeTxt').textContent = `${OP.nombre}: ${st.total} hechos en esta computadora (${st.Completo} completos, ${st.Pendiente} pendientes, ${st.Consultar} a consultar).`; }
 }
 
 /* ===================== mesa de carga ===================== */
@@ -945,20 +963,20 @@ function renderForm(){
       <input id="i_pegar" class="txt mono" style="margin-top:5px" placeholder="Pegar coordenadas: -34.64274, -58.57752" value="${r.f.coord === 'Corregida' && r.f.lat1 != null ? r.f.lat1 + ', ' + r.f.lon1 : ''}">
     </div></div>` : ''}
     <div class="frow"><label>Comisaría</label><div>${comisariaHTML(r)}</div></div>
-    ${v.autores ? `<div class="frow hd"><label>Autores</label>${chips(r, 'naut', L.naut)}</div>
-      <div class="frow"><label>Se movían</label>${chips(r, 'movil', L.movil)}</div>
-      <div class="frow"><label>Sexo autores</label>${chips(r, 'asexo', L.asexo)}</div>
-      <div class="frow"><label>Hay menores</label>${chips(r, 'amenor', L.amenor)}</div>` : ''}
-    ${v.arma ? `<div class="frow"><label>Arma</label>${chips(r, 'arma', L.arma)}</div>` : ''}
-    ${v.ingreso ? `<div class="frow"><label>Ingreso</label>${chips(r, 'ingreso', L.ingreso)}</div>` : ''}
-    ${v.obj ? `<div class="frow"><label>Se llevaron</label>${chips(r, 'obj', L.obj)}</div>` : ''}
+    ${v.autores ? `<div class="frow hd"><label>Autores</label>${chips(r, 'naut', LST.naut)}</div>
+      <div class="frow"><label>Se movían</label>${chips(r, 'movil', LST.movil)}</div>
+      <div class="frow"><label>Sexo autores</label>${chips(r, 'asexo', LST.asexo)}</div>
+      <div class="frow"><label>Hay menores</label>${chips(r, 'amenor', LST.amenor)}</div>` : ''}
+    ${v.arma ? `<div class="frow"><label>Arma</label>${chips(r, 'arma', LST.arma)}</div>` : ''}
+    ${v.ingreso ? `<div class="frow"><label>Ingreso</label>${chips(r, 'ingreso', LST.ingreso)}</div>` : ''}
+    ${v.obj ? `<div class="frow"><label>Se llevaron</label>${chips(r, 'obj', LST.obj)}</div>` : ''}
     ${v.autores ? `<div class="frow"><label>Descripción</label><div>${txt(r, 'desc', 'Ej: Peugeot 208 gris, 3 masc., gorra roja')}<div class="hint">Vehículo, ropa o apodos: lo que permite vincular hechos.</div></div></div>` : ''}
-    ${v.veh ? `<div class="frow hd"><label>Vehículo</label><div>${chips(r, 'tveh', L.tveh)}<div class="two" style="margin-top:5px">${txt(r, 'vehiculo', 'Marca, modelo, color')}${txt(r, 'dom', 'Dominio', true)}</div>
+    ${v.veh ? `<div class="frow hd"><label>Vehículo</label><div>${chips(r, 'tveh', LST.tveh)}<div class="two" style="margin-top:5px">${txt(r, 'vehiculo', 'Marca, modelo, color')}${txt(r, 'dom', 'Dominio', true)}</div>
       ${domsRel.length ? `<div class="hint">En el relato: ${domsRel.map(x => `<button type="button" class="chip mono" data-act="dom" data-v="${esc(x)}">${esc(x)}</button>`).join(' ')}</div>` : ''}<div id="cruce">${cruceDominio(r)}</div></div></div>` : ''}
-    ${v.estadoh ? `<div class="frow"><label>Estado</label>${chips(r, 'estadoh', L.estadoh)}</div>` : ''}
-    ${v.victima ? `<div class="frow hd"><label>Víctima</label>${chips(r, 'vsexo', L.vsexo)}</div>
-      <div class="frow"><label>Edad víctima</label>${chips(r, 'vedad', L.vedad)}</div>` : ''}
-    <div class="frow"><label>Aprehendidos</label>${chips(r, 'aprh', L.aprh)}</div>
+    ${v.estadoh ? `<div class="frow"><label>Estado</label>${chips(r, 'estadoh', LST.estadoh)}</div>` : ''}
+    ${v.victima ? `<div class="frow hd"><label>Víctima</label>${chips(r, 'vsexo', LST.vsexo)}</div>
+      <div class="frow"><label>Edad víctima</label>${chips(r, 'vedad', LST.vedad)}</div>` : ''}
+    <div class="frow"><label>Aprehendidos</label>${chips(r, 'aprh', LST.aprh)}</div>
     <div class="frow"><label>Observ.</label><textarea class="txt" data-in="obs" id="i_obs" placeholder="Dudas para el supervisor">${esc(r.f.obs||'')}</textarea></div>
   </div>
   <div class="missing" id="missing" hidden></div>
@@ -1140,7 +1158,7 @@ function renderAnalisis(){
   const N = entornoNarco(A.geo, R / 1000);
   const cnt = {}; geo.forEach(x => { const d = val(x.r,'delito'); cnt[d] = (cnt[d]||0)+1; });
   const conCruce = A.cruces.filter(c => c.robo && c.hall);
-  $('#aside').innerHTML = (MODO === 'supervisor' ? avanceHTML() : '') + `
+  $('#aside').innerHTML = `<div class="seg" style="margin-bottom:10px"><button class="btn primary sm" data-informe="pdf">Descargar informe PDF</button><button class="btn sm" data-informe="word">Descargar informe Word</button></div>` + (MODO === 'supervisor' ? avanceHTML() : '') + `
     <h3>Qué se muestra</h3>
     <div class="afil">
       <select id="aPend" aria-label="Registros"><option value="1"${pend==='1'?' selected':''}>Completos + pendientes</option><option value="0"${pend==='0'?' selected':''}>Solo completos</option></select>
@@ -1204,6 +1222,70 @@ function victimasHTML(rs){
   return `<table class="t"><tr><th>Modalidad</th><th>Hechos</th><th>Víctima mujer</th><th>Adulto mayor</th><th>Autores menores</th></tr>${filas.map(([k,x]) => `<tr><td>${esc(k)}</td><td>${x.n}</td><td>${pct(x.muj, x.sx)}</td><td>${pct(x.may, x.ed)}</td><td>${pct(x.am, x.amk)}</td></tr>`).join('')}</table>
     <p class="hint">Porcentajes sobre los hechos con el dato cargado (sin contar S/D).</p>`;
 }
+/* ---------- informe descargable ---------- */
+function informe(tipo){
+  const pend = $('#aPend')?.value ?? '1', R = +($('#aRadio')?.value ?? 300), fc = $('#aCom')?.value ?? '', fd = $('#aDel')?.value ?? '';
+  let base = baseAnalisis({ pend: pend === '1' }).filter(r => (!fc || val(r,'comisaria') === fc) && (!fd || val(r,'delito') === fd));
+  if (!base.length) return toast('No hay hechos para el informe con estos filtros.');
+  const A = analizar(base), N = entornoNarco(A.geo, R / 1000);
+  const fechas = base.filter(r => r.f.fecha1 || r.fchk === 'OK' || r.fchk === 'SIN HORA').map(fechaFinal).filter(Boolean).sort();
+  const cnt = {}; base.forEach(r => { const d = val(r,'delito'); cnt[d] = (cnt[d] || 0) + 1; });
+  // franja x día para robos y automotor
+  const fx = {}; base.filter(r => ['ROBO','AUTOMOTOR'].includes(val(r,'delito')) && franjaDe(r) && diaDe(r)).forEach(r => { const k = franjaDe(r) + '|' + diaDe(r); fx[k] = (fx[k] || 0) + 1; });
+  const mx = Math.max(1, ...Object.values(fx)), dias = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+  const celda = v => `<td style="text-align:center;background:rgba(209,73,91,${(v||0)/mx*0.85});${(v||0)/mx > .55 ? 'color:#fff;' : ''}">${v || ''}</td>`;
+  const series = A.series.filter(x => SERIES_EST[x.key] !== 'Descartada');
+  const cruces = A.cruces.filter(c => c.robo && c.hall);
+  const mapa = tipo === 'pdf' ? mapaSVG(A.geo) : '';
+  const limpiar = h => h.replace(/<tr class="cl"[^>]*>/g, '<tr>').replace(/<p class="hint">Clic[^<]*<\/p>/g, '');
+  const html = `<h1>NEXO · Informe de análisis</h1>
+  <p class="sub">${esc(OP.partidos.join(' · '))}<br>Hechos del ${fmtF(fechas[0])} al ${fmtF(fechas.at(-1))} · ${base.length} hechos · ${pend === '1' ? 'completos y pendientes (los pendientes con valores sugeridos)' : 'solo completos'}${fc ? ' · Comisaría: ' + esc(fc) : ''}${fd ? ' · Delito: ' + esc(fd) : ''}<br>Generado el ${new Date().toLocaleString('es-AR')} por ${esc(OP.nombre)}</p>
+  <h2>Hechos por delito</h2>
+  <table class="t"><tr><th>Delito</th><th>Hechos</th><th>%</th></tr>${Object.entries(cnt).sort((a,b)=>b[1]-a[1]).map(([d,n]) => `<tr><td>${esc(d)}</td><td>${n}</td><td>${Math.round(100*n/base.length)}%</td></tr>`).join('')}</table>
+  ${mapa ? `<h2>Mapa de hechos</h2>${mapa}` : ''}
+  <h2>Robos y automotores por franja horaria y día</h2>
+  <table class="t"><tr><th>Franja</th>${dias.map(d => `<th>${d.slice(0,3)}</th>`).join('')}</tr>${FRANJAS.map(f => `<tr><td>${f}</td>${dias.map(d => celda(fx[f + '|' + d])).join('')}</tr>`).join('')}</table>
+  <h2>Posibles series (bandas) · ${series.length}</h2>
+  ${series.length ? series.map((x, i) => `<div class="serie"><b>${i + 1}. ${esc(x.tipo)} · ${x.items.length} hechos</b>${SERIES_EST[x.key] === 'Confirmada' ? ' · <b style="color:#2C7A4B">CONFIRMADA</b>' : ''}${new Set(x.items.map(r => val(r,'comisaria')).filter(Boolean)).size > 1 ? ' · <b style="color:#B8620F">CRUZA JURISDICCIONES</b>' : ''}<br>
+    ${esc(x.zona)} · del ${fmtF(x.desde)} al ${fmtF(x.hasta)}<br>En común: ${esc(x.rasgos || '—')}<br>Comisarías: ${esc([...new Set(x.items.map(r => val(r,'comisaria')).filter(Boolean))].join(' · ') || '—')}<br>
+    Hechos: ${x.items.map(r => `N° ${r.n} (IPP ${esc(r.ipp)})`).join(', ')}</div>`).join('') : '<p>Sin series con los datos actuales.</p>'}
+  <h2>Por comisaría</h2>${limpiar(porComisariaHTML(base, A)).replace('max-height:320px;overflow:auto', '')}
+  <h2>A quién le roban</h2>${victimasHTML(base)}
+  <h2>Entorno de puntos de venta de droga (radio ${R} m)</h2>
+  ${N ? `<p>A menos de ${R} m de los ${N.puntos} puntos de venta denunciados ocurre el ${(N.shareHechos*100).toFixed(0)}% de los otros hechos, en el ${(N.shareArea*100).toFixed(0)}% de la superficie: ${N.ratio ? N.ratio.toFixed(1) + ' veces' : '—'} más concentración que en el resto de la zona.</p>
+    <table class="t"><tr><th>Modalidad</th><th>Cerca</th><th>Lejos</th><th>% cerca</th></tr>${Object.entries(N.porMod).filter(([,v]) => v[0]+v[1] >= 5).sort((a,b) => b[1][0]/(b[1][0]+b[1][1]) - a[1][0]/(a[1][0]+a[1][1])).slice(0,12).map(([k,v]) => `<tr><td>${esc(k)}</td><td>${v[0]}</td><td>${v[1]}</td><td>${Math.round(100*v[0]/(v[0]+v[1]))}%</td></tr>`).join('')}</table>
+    <p><b>Puntos con más hechos alrededor:</b></p><table class="t"><tr><th>Punto</th><th>Hechos alrededor</th><th>Más frecuentes</th></tr>${N.top.slice(0,8).map(t => `<tr><td>N° ${t.p.r.n} · ${esc(t.p.r.localidad)} · ${esc(t.p.r.calle)} ${esc(t.p.r.altura)}</td><td>${t.n}</td><td>${esc(t.top)}</td></tr>`).join('')}</table>
+    <p class="hint">Es una asociación, no prueba causa.</p>` : '<p>Sin datos suficientes.</p>'}
+  <h2>Vehículos robados y hallados · ${cruces.length}</h2>
+  ${cruces.length ? `<table class="t"><tr><th>Dominio</th><th>Vehículo</th><th>Robado</th><th>Hallado</th><th>Resultado</th><th>Distancia</th></tr>${cruces.map(c => `<tr><td>${esc(c.dom)}</td><td>${esc(c.veh)}</td><td>${fmtF(fechaFinal(c.robo))} · ${esc(c.robo.localidad)}</td><td>${fmtF(fechaFinal(c.hall))} · ${esc(c.hall.localidad)}</td><td>${esc(c.resultado)}</td><td>${c.dist != null ? c.dist.toFixed(1) + ' km' : '—'}</td></tr>`).join('')}</table>` : '<p>Sin cruces todavía.</p>'}
+  ${MODO === 'supervisor' ? `<h2>Avance de carga</h2>${limpiar(avanceHTML()).replace(/<h3>[^<]*<\/h3>/g, '<h3>$&</h3>').replace(/<h3><h3>/g,'<h3>').replace(/<\/h3><\/h3>/g,'</h3>')}` : ''}`;
+  const css = `body{font-family:Arial,Helvetica,sans-serif;color:#17202A;font-size:11pt;margin:24px}h1{font-size:20pt;color:#1D4A73;margin:0 0 4px}h2{font-size:13pt;color:#1D4A73;border-bottom:1.5px solid #1D4A73;padding-bottom:3px;margin:22px 0 8px}h3{font-size:11pt;margin:14px 0 6px}
+    .sub{color:#5A6470;font-size:9.5pt}.t{border-collapse:collapse;width:100%;font-size:9.5pt;margin:4px 0}.t th{background:#DCE7F1;text-align:left;padding:4px 6px;border:1px solid #BFC9D4}.t td{padding:4px 6px;border:1px solid #D4D9D2;vertical-align:top}
+    .hint{color:#5A6470;font-size:9pt}.serie{border:1px solid #D4D9D2;border-radius:6px;padding:7px 9px;margin:0 0 7px;font-size:10pt;page-break-inside:avoid}.flag{font-weight:bold}h2{page-break-after:avoid}table{page-break-inside:auto}tr{page-break-inside:avoid}
+    @page{margin:15mm}`;
+  const nombre = `NEXO_informe_${todayISO()}`;
+  if (tipo === 'word') {
+    const doc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${nombre}</title><style>${css}</style></head><body>${html}</body></html>`;
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff', doc], { type:'application/msword' })); a.download = nombre + '.doc'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    toast('Informe Word descargado.');
+  } else {
+    const w = window.open('', '_blank'); if (!w) return toast('El navegador bloqueó la ventana del informe. Permití las ventanas emergentes para este sitio.');
+    w.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${nombre}</title><style>${css}</style></head><body>${html}<script>setTimeout(()=>window.print(),400)<\/script></body></html>`); w.document.close();
+    toast('En la ventana de impresión elegí “Guardar como PDF”.', 4000);
+  }
+}
+function mapaSVG(geo){
+  if (!geo.length) return '';
+  const lats = geo.map(x => x.ll[0]).sort((a,b)=>a-b), lons = geo.map(x => x.ll[1]).sort((a,b)=>a-b), q = (a, p) => a[Math.floor(p * (a.length - 1))];
+  const la0 = q(lats,.01), la1 = q(lats,.99), lo0 = q(lons,.01), lo1 = q(lons,.99), W = 700, ky = Math.cos((la0+la1)/2*Math.PI/180);
+  const H = Math.max(260, Math.min(700, W * (la1 - la0) / ((lo1 - lo0) * ky)));
+  const X = o => 20 + (o - lo0) / (lo1 - lo0) * (W - 40), Y = a => 20 + (la1 - a) / (la1 - la0) * (H - 40);
+  const pts = geo.filter(x => x.ll[0] >= la0 && x.ll[0] <= la1 && x.ll[1] >= lo0 && x.ll[1] <= lo1).map(x => `<circle cx="${X(x.ll[1]).toFixed(1)}" cy="${Y(x.ll[0]).toFixed(1)}" r="2.6" fill="${COLOR[val(x.r,'delito')] || '#888'}" fill-opacity=".75"/>`).join('');
+  const usados = DELITOS.filter(d => geo.some(x => val(x.r,'delito') === d));
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H + 30}" width="100%" style="border:1px solid #D4D9D2;background:#F7F8F6"><rect width="${W}" height="${H}" fill="#F7F8F6"/>${pts}
+    ${usados.map((d, i) => `<circle cx="${24 + i * 86}" cy="${H + 14}" r="5" fill="${COLOR[d]}"/><text x="${32 + i * 86}" y="${H + 18}" font-size="10" font-family="Arial" fill="#17202A">${d.slice(0, 12)}</text>`).join('')}</svg>
+    <p class="hint">Cada punto es un hecho, sin mapa de fondo. Para ver calles y zonas, usá el mapa de NEXO Supervisor.</p>`;
+}
 function avanceHTML(){
   const filas = ASIG_OPS.map(a => {
     const ps = new Set(a.partidos.map(normP)), rs = mios().filter(r => ps.has(normP(r.partido)));
@@ -1260,9 +1342,10 @@ function irTab(t){
 
 /* ===================== eventos ===================== */
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-f],[data-act],.item,[data-tab],[data-serie],[data-sest],[data-radio],[data-goto],[data-cruce],[data-paq],[data-consulta],[data-com]'); if (!t) return;
+  const t = e.target.closest('[data-f],[data-act],.item,[data-tab],[data-serie],[data-sest],[data-radio],[data-goto],[data-cruce],[data-paq],[data-consulta],[data-com],[data-informe]'); if (!t) return;
   if (t.dataset.com) { const sel = $('#aCom'); if (sel) { sel.value = t.dataset.com === 'Sin comisaría' ? '' : t.dataset.com; renderAnalisis(); } return; }
   if (t.dataset.paq) return descargarPaquete(+t.dataset.paq);
+  if (t.dataset.informe) return informe(t.dataset.informe);
   if (t.dataset.consulta) return verConsulta(t.dataset.consulta);
   if (t.dataset.tab) return irTab(t.dataset.tab);
   if (t.classList.contains('item')) return seleccionar(t.dataset.id);
@@ -1366,6 +1449,17 @@ $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') $('#mo
 $('#fileRaw').addEventListener('change', e => { const f = e.target.files[0]; if (f) cargarCrudo(f); e.target.value = ''; });
 $('#fileImport').addEventListener('change', e => { const f = [...e.target.files]; if (f.length) importarAvance(f); e.target.value = ''; });
 $('#btnResume').onclick = abrirMesa;
+$('#btnBorrar').onclick = () => { const n = RECS.size; $('#borrarBox').hidden = false; $('#borrarTxt').value = ''; $('#borrarTxt').focus(); $('#btnBorrar').hidden = true;
+  $('#borrarBox').querySelector('p').innerHTML = `Se van a borrar <b>${n}</b> hechos de esta computadora. Para confirmar, escribí <b>BORRAR</b> y tocá el botón rojo:`; };
+$('#btnBorrarNo').onclick = () => { $('#borrarBox').hidden = true; $('#btnBorrar').hidden = false; };
+$('#borrarTxt').addEventListener('input', e => { $('#btnBorrarOk').disabled = e.target.value.trim().toUpperCase() !== 'BORRAR'; });
+$('#btnBorrarOk').onclick = async () => {
+  try { await new Promise(res => { if (!idb) return res(); const tx = idb.transaction('rec','readwrite'); tx.objectStore('rec').clear(); tx.oncomplete = res; tx.onerror = res; }); } catch(e){}
+  try { Object.keys(localStorage).filter(k => k.startsWith(MODO + '_rd_')).forEach(k => localStorage.removeItem(k)); } catch(e){}
+  RECS.clear(); OP = null; SERIES_EST = {}; sinceExport = 0; _comis = null; LAST_ROWS = []; CUR = null;
+  $('#borrarBox').hidden = true; $('#btnBorrar').hidden = false; $('#loadSummary').innerHTML = ''; $('#importSummary').innerHTML = ''; $('#opName').value = ''; $('#opPartidos').value = '';
+  renderSetup(); toast('Listo: esta computadora quedó sin datos. Podés empezar de cero.', 3500);
+};
 const drop = $('#drop');
 ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
 ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
