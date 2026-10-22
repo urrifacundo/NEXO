@@ -133,6 +133,13 @@ textarea.txt{min-height:44px;resize:vertical}
 /* análisis */
 .ana{display:grid;grid-template-columns:minmax(0,1fr) 420px;height:100%}
 #amap{height:100%;background:var(--panel2)}
+.mapwrap{position:relative;height:100%;min-height:0}
+#focoBar{position:absolute;top:10px;left:56px;right:70px;z-index:1000;background:var(--panel);border:2px solid var(--accent);border-radius:8px;padding:7px 12px;font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+#focoBar b{color:var(--accent)}
+.lgbtn{border:1px solid var(--line);background:var(--panel);border-radius:14px;padding:2px 9px 2px 6px;font-size:11.5px;display:inline-flex;align-items:center;gap:5px}
+.lgbtn i{display:inline-block;width:10px;height:10px;border-radius:50%}
+.lgbtn.off{opacity:.4;text-decoration:line-through}
+.numpin{background:#D1495B;color:#fff;border:2px solid #fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font:700 11px Arial;box-shadow:0 1px 3px rgba(0,0,0,.4)}
 .aside{border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding:12px 14px 40px}
 .aside h3{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:16px 0 6px}
 .aside h3:first-child{margin-top:0}
@@ -200,7 +207,7 @@ body.sup .tabs,body.sup #vCarga,body.sup .op-only{display:none!important}
   #scrDesk{display:block;height:auto}
   .desk,.ana{grid-template-columns:1fr;height:auto}
   .col{overflow:visible}.list{max-height:240px}
-  #amap{height:420px}
+  #amap{height:420px} .mapwrap{height:auto}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -292,7 +299,7 @@ body.sup .tabs,body.sup #vCarga,body.sup .op-only{display:none!important}
 
   <div class="view" id="vAnalisis" hidden>
     <div class="ana">
-      <div id="amap"></div>
+      <div class="mapwrap"><div id="amap"></div><div id="focoBar" hidden></div></div>
       <aside class="aside" id="aside"></aside>
     </div>
   </div>
@@ -1108,7 +1115,8 @@ function analizar(base){
       if (km(a.ll[0], a.ll[1], b.ll[0], b.ll[1]) > kmMax || Math.abs(diasEntre(fechaFinal(a.r), fechaFinal(b.r))) > diasMax) return null;
       if (pref === 'modelo') { const ma = modeloDe(a.r); return ma && ma === modeloDe(b.r) && frM[ma] / it.length <= 0.12 ? ['mismo modelo: ' + val(a.r,'vehiculo').split(' ').slice(0,2).join(' ')] : null; }
       const c = compartidos(a.t, b.t, peso); return c.out.length >= 2 && c.bits >= minR ? c.out : null;
-    }).forEach(cmp => {
+    }).map(cmp => { const cy = cmp.items.reduce((a, x) => a + x.ll[0], 0) / cmp.items.length, cx = cmp.items.reduce((a, x) => a + x.ll[1], 0) / cmp.items.length;
+      return { ...cmp, items: cmp.items.filter(x => km(cy, cx, x.ll[0], x.ll[1]) <= Math.max(1.2, kmMax * 1.25)) }; }).filter(cmp => cmp.items.length >= 3).forEach(cmp => {
       const rs = cmp.items.map(x => x.r).sort((a,b) => fechaFinal(a).localeCompare(fechaFinal(b)));
       const freq = {}; cmp.why.forEach(w => freq[w] = (freq[w]||0) + 1);
       const top = Object.entries(freq).sort((a,b) => b[1]-a[1]).slice(0,4).map(e => e[0]).join(' · ');
@@ -1120,7 +1128,7 @@ function analizar(base){
   grupo(r => val(r,'delito') === 'ROBO' && VIVIENDA.includes(val(r,'modal')), 'Vivienda', 1.5, 21, 4);
   grupo(r => val(r,'delito') === 'ROBO' && ['Motochorro','Vía pública a pie','Asalto a comercio'].includes(val(r,'modal')), 'Robo', 1.0, 14, 5);
   grupo(r => val(r,'delito') === 'AUTOMOTOR' && val(r,'modal') === 'Asalto', 'Automotor', 1.5, 14, 5);
-  grupo(r => val(r,'delito') === 'AUTOMOTOR' && val(r,'modal') === 'Levantamiento' && val(r,'vehiculo'), 'Automotor', 2.0, 30, 0, 'modelo');
+  grupo(r => val(r,'delito') === 'AUTOMOTOR' && val(r,'modal') === 'Levantamiento' && val(r,'vehiculo'), 'Automotor', 1.2, 21, 0, 'modelo');
   series.sort((a,b) => b.items.length - a.items.length);
   // cruce de dominios
   const porDom = {};
@@ -1155,17 +1163,29 @@ function entornoNarco(geo, R){
   }
   const shareArea = urb ? inb / urb : 0, shareHechos = dentro.length / otros.length;
   const porMod = {}; for (const x of otros) { const k = val(x.r,'delito') + ' · ' + (val(x.r,'modal') || 'sin modalidad'); (porMod[k] ||= [0,0]); porMod[k][cerca(x) ? 0 : 1]++; }
+  // puntos de venta: varias denuncias a menos de 150 m se toman como un mismo punto
+  const grupos = [];
+  for (const p of puntos) { const g = grupos.find(g => km(g.ll[0], g.ll[1], p.ll[0], p.ll[1]) <= 0.15); if (g) g.miembros.push(p); else grupos.push({ ll: p.ll, miembros: [p] }); }
+  const esArma = x => val(x.r,'delito') === 'ARMAS' || val(x.r,'delito') === 'HOMICIDIO';
+  const esHerido = x => val(x.r,'delito') === 'HOMICIDIO' || val(x.r,'modal') === 'Herido de arma de fuego';
+  const esRobo = x => val(x.r,'delito') === 'ROBO' || (val(x.r,'delito') === 'AUTOMOTOR' && val(x.r,'modal') === 'Asalto');
+  grupos.forEach((g, i) => { g.i = i; g.cerca = otros.filter(x => km(g.ll[0], g.ll[1], x.ll[0], x.ll[1]) <= R);
+    g.robos = g.cerca.filter(esRobo).length; g.armas = g.cerca.filter(esArma).length; g.heridos = g.cerca.filter(esHerido).length; });
+  grupos.sort((a,b) => b.armas - a.armas || b.robos - a.robos || b.cerca.length - a.cerca.length);
+  const arm = otros.filter(esArma), armCerca = arm.filter(cerca).length;
+  const violencia = arm.length >= 3 && shareArea ? { n: arm.length, cerca: armCerca, ratio: (armCerca / arm.length) / shareArea } : null;
   const top = puntos.map(p => { const c = otros.filter(x => km(p.ll[0], p.ll[1], x.ll[0], x.ll[1]) <= R); const f = {}; c.forEach(x => { const k = val(x.r,'modal') || val(x.r,'delito').toLowerCase(); f[k] = (f[k]||0)+1; }); return { p, n: c.length, top: Object.entries(f).sort((a,b)=>b[1]-a[1]).slice(0,2).map(e => `${e[0]} (${e[1]})`).join(', ') }; }).sort((a,b) => b.n - a.n);
-  return { puntos: puntos.length, otros: otros.length, dentro: dentro.length, shareArea, shareHechos, ratio: shareArea ? shareHechos / shareArea : null, porMod, top };
+  return { puntos: puntos.length, otros: otros.length, dentro: dentro.length, shareArea, shareHechos, ratio: shareArea ? shareHechos / shareArea : null, porMod, top, grupos, violencia };
 }
-let amap = null, aLayers = null, aSel = null;
+let amap = null, aLayers = null, aSel = null, FOCO = null, LAST_N = null, LAST_A = null;
+let OCULTOS = new Set(lsGet(MODO + '_rd_ocultos', []));
 function renderAnalisis(){
   const pend = $('#aPend')?.value ?? '1', R = +($('#aRadio')?.value ?? 300), capa = $('#aCapa')?.value ?? 'puntos', fd = $('#aDel')?.value ?? '', ff = $('#aFr')?.value ?? '', fc = $('#aCom')?.value ?? '';
   let base = baseAnalisis({ pend: pend === '1' });
   const A = analizar(base);
   let geo = A.geo.filter(x => (!fd || val(x.r,'delito') === fd) && (!ff || franjaDe(x.r) === ff) && (!fc || val(x.r,'comisaria') === fc));
   const comisAll = [...new Set(base.map(r => val(r,'comisaria')).filter(Boolean))].sort();
-  const N = entornoNarco(A.geo, R / 1000);
+  const N = entornoNarco(A.geo, R / 1000); LAST_N = N; LAST_A = A;
   const cnt = {}; geo.forEach(x => { const d = val(x.r,'delito'); cnt[d] = (cnt[d]||0)+1; });
   const conCruce = A.cruces.filter(c => c.robo && c.hall);
   $('#aside').innerHTML = `<div class="seg" style="margin-bottom:10px"><button class="btn primary sm" data-informe="pdf">Descargar informe PDF</button><button class="btn sm" data-informe="word">Descargar informe Word</button></div>` + (MODO === 'supervisor' ? avanceHTML() : '') + `
@@ -1177,7 +1197,9 @@ function renderAnalisis(){
       <select id="aFr" aria-label="Franja"><option value="">Todas las franjas</option>${FRANJAS.map(f => `<option${f===ff?' selected':''}>${f}</option>`).join('')}</select>
       <select id="aCom" aria-label="Comisaría" style="grid-column:1/3"><option value="">Todas las comisarías</option>${comisAll.map(c => `<option${c===fc?' selected':''}>${esc(c)}</option>`).join('')}</select>
     </div>
-    <div class="lgd" style="margin-top:8px">${DELITOS.filter(d => cnt[d]).map(d => `<span><i style="background:${COLOR[d]}"></i>${d} ${cnt[d]}</span>`).join('')}</div>
+    <div class="lgd" style="margin-top:8px">${DELITOS.filter(d => cnt[d]).map(d => `<button class="lgbtn${OCULTOS.has(d) ? ' off' : ''}" data-lg="${d}" title="Mostrar u ocultar en el mapa"><i style="background:${COLOR[d]}"></i>${d} ${cnt[d]}</button>`).join('')}
+      <button class="lgbtn" data-lg="__todos">Ver todos</button><button class="lgbtn" data-lg="__solo">Ocultar todos</button></div>
+    <p class="hint">Tocá un delito para mostrarlo u ocultarlo en el mapa.</p>
     <p class="hint">${pend==='1' ? 'Los pendientes se cuentan con los valores sugeridos.' : ''} ${base.length - A.geo.length} hechos sin ubicación no aparecen en el mapa.</p>
 
     <h3>Posibles series (bandas) · ${A.series.length}</h3>
@@ -1199,8 +1221,9 @@ function renderAnalisis(){
     ${N ? `<div class="hallazgo-txt">${N.ratio ? `A menos de ${R} m de los <strong>${N.puntos}</strong> puntos de venta denunciados ocurre el <strong>${(N.shareHechos*100).toFixed(0)}%</strong> de los otros hechos, en el <strong>${(N.shareArea*100).toFixed(0)}%</strong> de la superficie: <strong>${N.ratio.toFixed(1)} veces</strong> más concentración que en el resto de la zona.` : ''}</div>
       <table class="t" style="margin-top:8px"><tr><th>Modalidad</th><th>Cerca</th><th>Lejos</th><th>% cerca</th></tr>
       ${Object.entries(N.porMod).filter(([,v]) => v[0]+v[1] >= 5).sort((a,b) => b[1][0]/(b[1][0]+b[1][1]) - a[1][0]/(a[1][0]+a[1][1])).slice(0,10).map(([k,v]) => `<tr><td>${esc(k)}</td><td>${v[0]}</td><td>${v[1]}</td><td>${Math.round(100*v[0]/(v[0]+v[1]))}%</td></tr>`).join('')}</table>
-      <p class="hint">Puntos con más hechos alrededor:</p>
-      <table class="t">${N.top.slice(0,6).map(t => `<tr class="cl" data-goto="${t.p.ll[0]},${t.p.ll[1]}"><td>N° ${t.p.r.n} · ${esc(t.p.r.localidad)}</td><td>${t.n} hechos</td><td>${esc(t.top)}</td></tr>`).join('')}</table>
+      ${N.violencia ? `<div class="hallazgo-txt" style="margin-top:8px">De los <strong>${N.violencia.n}</strong> hechos con armas (disparos, heridos, homicidios), <strong>${N.violencia.cerca}</strong> ocurrieron a menos de ${R} m de un punto de venta: <strong>${N.violencia.ratio.toFixed(1)} veces</strong> lo esperable por superficie.</div>` : ''}
+      <p class="hint" style="margin-top:8px"><b>Puntos de venta y lo que pasa alrededor</b> (denuncias a menos de 150 m cuentan como un mismo punto). Tocá uno para verlo solo en el mapa.</p>
+      <table class="t"><tr><th>Punto</th><th>Armas</th><th>Heridos</th><th>Robos</th><th>Total</th></tr>${N.grupos.slice(0,12).map(g => `<tr class="cl" data-foconarco="${g.i}"><td>${esc(g.miembros[0].r.localidad)} · ${esc(g.miembros[0].r.calle)} ${esc(g.miembros[0].r.altura)}${g.miembros.length > 1 ? `<br><span class="hint">${g.miembros.length} denuncias</span>` : ''}</td><td>${g.armas || ''}</td><td>${g.heridos || ''}</td><td>${g.robos || ''}</td><td>${g.cerca.length}</td></tr>`).join('')}</table>
       <p class="hint">Es una asociación, no prueba causa. Sirve para elegir dónde mirar: robos para comprar droga, reducción de celulares o conflictos armados alrededor del punto.</p>`
       : '<p class="hint">Hacen falta hechos de narcomenudeo ubicados y al menos 10 hechos de otros delitos.</p>'}
 
@@ -1296,6 +1319,7 @@ function mapaSVG(geo){
     ${usados.map((d, i) => `<circle cx="${24 + i * 86}" cy="${H + 14}" r="5" fill="${COLOR[d]}"/><text x="${32 + i * 86}" y="${H + 18}" font-size="10" font-family="Arial" fill="#17202A">${d.slice(0, 12)}</text>`).join('')}</svg>
     <p class="hint">Cada punto es un hecho, sin mapa de fondo. Para ver calles y zonas, usá el mapa de NEXO Supervisor.</p>`;
 }
+function reAnalisis(){ const sc = $('#aside').scrollTop; renderAnalisis(); $('#aside').scrollTop = sc; }
 function avanceHTML(){
   const filas = ASIG_OPS.map(a => {
     const ps = new Set(a.partidos.map(normP)), rs = mios().filter(r => ps.has(normP(r.partido)));
@@ -1378,14 +1402,38 @@ function pintarMapa2(geo, A, N, R, capa){
   }
   if (aLayers) aLayers.remove();
   aLayers = L.layerGroup().addTo(amap);
+  const bar = $('#focoBar');
+  if (FOCO) { pintarFoco(A, N, R, bar); setTimeout(() => amap.invalidateSize(), 50); return; }
+  bar.hidden = true;
+  geo = geo.filter(x => !OCULTOS.has(val(x.r,'delito')));
   if (capa === 'calor' && L.heatLayer) L.heatLayer(geo.map(x => [x.ll[0], x.ll[1], 0.6]), { radius:18, blur:22, maxZoom:15 }).addTo(aLayers);
   else geo.forEach(x => L.circleMarker(x.ll, { radius:4.5, weight:0.8, color:'#fff', fillColor:COLOR[val(x.r,'delito')] || '#888', fillOpacity:.85 })
       .bindPopup(() => popupHTML(x.r)).addTo(aLayers));
-  if (N) A.geo.filter(x => val(x.r,'delito') === 'NARCOMENUDEO').forEach(x => L.circle(x.ll, { radius:R, color:COLOR.NARCOMENUDEO, weight:1, fillOpacity:.06, dashArray:'4 4', interactive:false }).addTo(aLayers));
+  if (N && !OCULTOS.has('NARCOMENUDEO')) A.geo.filter(x => val(x.r,'delito') === 'NARCOMENUDEO').forEach(x => L.circle(x.ll, { radius:R, color:COLOR.NARCOMENUDEO, weight:1, fillOpacity:.06, dashArray:'4 4', interactive:false }).addTo(aLayers));
   A.cruces.filter(c => c.robo && c.hall && latlon(c.robo) && latlon(c.hall)).forEach(c => L.polyline([latlon(c.robo), latlon(c.hall)], { color:COLOR.AUTOMOTOR, weight:2, dashArray:'6 5', opacity:.8 }).bindTooltip(`${c.dom}: ${c.resultado}`).addTo(aLayers));
   if (aSel) { L.polygon(aSel, { color:'#D1495B', weight:2, fillOpacity:.08 }).addTo(aLayers); }
   setTimeout(() => amap.invalidateSize(), 50);
   if (!pintarMapa._fit && geo.length) { amap.fitBounds(L.latLngBounds(geo.map(x => x.ll)).pad(0.05)); pintarMapa._fit = true; }
+}
+function pintarFoco(A, N, R, bar){
+  const pin = (ll, n, color) => L.marker(ll, { icon: L.divIcon({ className:'', html:`<div class="numpin" style="background:${color}">${n}</div>`, iconSize:[22,22], iconAnchor:[11,11] }) });
+  if (FOCO.serie) {
+    const s = A.series.find(x => x.key === FOCO.serie); if (!s) { FOCO = null; return renderAnalisis(); }
+    const pts = s.items.map(r => [r, latlon(r)]).filter(x => x[1]);
+    L.polyline(pts.map(x => x[1]), { color:'#D1495B', weight:2.5, dashArray:'6 6', opacity:.85 }).addTo(aLayers);
+    pts.forEach(([r, ll], i) => pin(ll, i + 1, COLOR[val(r,'delito')] || '#D1495B').bindPopup(() => popupHTML(r)).addTo(aLayers));
+    amap.fitBounds(L.latLngBounds(pts.map(x => x[1])).pad(0.35), { maxZoom:16 });
+    bar.innerHTML = `<span>Mostrando solo la serie <b>${esc(s.tipo)} · ${s.items.length} hechos</b> (${fmtF(s.desde)} a ${fmtF(s.hasta)}). Los números siguen el orden en que ocurrieron.</span><button class="btn sm primary" data-act="focoOff">Ver todo el mapa</button>`;
+  } else if (FOCO.narco != null && N) {
+    const g = N.grupos.find(x => x.i === FOCO.narco); if (!g) { FOCO = null; return renderAnalisis(); }
+    L.circle(g.ll, { radius:R, color:COLOR.NARCOMENUDEO, weight:2, fillOpacity:.07, dashArray:'5 5', interactive:false }).addTo(aLayers);
+    g.cerca.forEach(x => L.circleMarker(x.ll, { radius:7, weight:1.5, color:'#fff', fillColor:COLOR[val(x.r,'delito')] || '#888', fillOpacity:.95 }).bindPopup(() => popupHTML(x.r)).addTo(aLayers));
+    g.miembros.forEach(m => L.circleMarker(m.ll, { radius:10, weight:3, color:'#fff', fillColor:COLOR.NARCOMENUDEO, fillOpacity:1 }).bindPopup(() => popupHTML(m.r)).addTo(aLayers));
+    amap.fitBounds(L.latLng(g.ll).toBounds(R * 2.6), { maxZoom:17 });
+    const f = {}; g.cerca.forEach(x => { const k = val(x.r,'delito'); f[k] = (f[k] || 0) + 1; });
+    bar.innerHTML = `<span>Punto de venta en <b>${esc(g.miembros[0].r.localidad)} · ${esc(g.miembros[0].r.calle)} ${esc(g.miembros[0].r.altura)}</b> (${g.miembros.length} denuncia${g.miembros.length > 1 ? 's' : ''}) y lo que pasó a menos de ${R} m: ${Object.entries(f).sort((a,b)=>b[1]-a[1]).map(([k,n]) => `${n} ${k.toLowerCase()}`).join(', ') || 'nada'}.</span><button class="btn sm primary" data-act="focoOff">Ver todo el mapa</button>`;
+  } else { FOCO = null; return renderAnalisis(); }
+  bar.hidden = false;
 }
 function irTab(t){
   TAB = t; document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
@@ -1395,7 +1443,7 @@ function irTab(t){
 
 /* ===================== eventos ===================== */
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-f],[data-act],.item,[data-tab],[data-serie],[data-sest],[data-radio],[data-goto],[data-cruce],[data-paq],[data-consulta],[data-com],[data-informe]'); if (!t) return;
+  const t = e.target.closest('[data-f],[data-act],.item,[data-tab],[data-serie],[data-sest],[data-radio],[data-goto],[data-cruce],[data-paq],[data-consulta],[data-com],[data-informe],[data-foconarco],[data-lg]'); if (!t) return;
   if (t.dataset.com) { const sel = $('#aCom'); if (sel) { sel.value = t.dataset.com === 'Sin comisaría' ? '' : t.dataset.com; renderAnalisis(); } return; }
   if (t.dataset.paq) return descargarPaquete(+t.dataset.paq);
   if (t.dataset.informe) return informe(t.dataset.informe);
@@ -1404,7 +1452,11 @@ document.addEventListener('click', e => {
   if (t.classList.contains('item')) return seleccionar(t.dataset.id);
   if (t.dataset.sest) { e.stopPropagation(); SERIES_EST[t.dataset.k] = SERIES_EST[t.dataset.k] === t.dataset.sest ? '' : t.dataset.sest; lsSet(MODO + '_rd_series', SERIES_EST); return renderAnalisis(); }
   if (t.dataset.radio) { $('#aRadio').value = t.dataset.radio; return renderAnalisis(); }
-  if (t.dataset.serie) { const A = analizar(baseAnalisis({ pend: ($('#aPend')?.value ?? '1') === '1' })); const s = A.series.find(x => x.key === t.dataset.serie); if (s && amap) { amap.fitBounds(L.latLngBounds(s.ll).pad(0.6)); s.ll.forEach(ll => L.circleMarker(ll, { radius:10, color:'#D1495B', weight:2.5, fill:false }).addTo(aLayers)); } return; }
+  if (t.dataset.serie) { FOCO = { serie: t.dataset.serie }; return reAnalisis(); }
+  if (t.dataset.foconarco != null && t.dataset.foconarco !== undefined) { FOCO = { narco: +t.dataset.foconarco }; return reAnalisis(); }
+  if (t.dataset.lg) { const d = t.dataset.lg;
+    if (d === '__todos') OCULTOS.clear(); else if (d === '__solo') DELITOS.forEach(x => OCULTOS.add(x)); else OCULTOS.has(d) ? OCULTOS.delete(d) : OCULTOS.add(d);
+    lsSet(MODO + '_rd_ocultos', [...OCULTOS]); FOCO = null; return reAnalisis(); }
   if (t.dataset.goto && amap) { const [a, o] = t.dataset.goto.split(',').map(Number); amap.setView([a, o], 16); return; }
   if (t.dataset.cruce && amap) { const A = analizar(baseAnalisis({ pend:true })); const c = A.cruces.find(x => x.dom === t.dataset.cruce); const pts = [c?.robo && latlon(c.robo), c?.hall && latlon(c.hall)].filter(Boolean); if (pts.length) amap.fitBounds(L.latLngBounds(pts).pad(0.5), { maxZoom:16 }); return; }
   const r = RECS.get(CUR);
@@ -1417,6 +1469,7 @@ document.addEventListener('click', e => {
     if (k === 'delito' || k === 'modal') renderList(); return;
   }
   const a = t.dataset.act; if (!a) return;
+  if (a === 'focoOff') { FOCO = null; pintarMapa._fit = false; return reAnalisis(); }
   if (a === 'save') return guardarYSeguir('Completo');
   if (a === 'consultar') return guardarYSeguir('Consultar');
   if (a === 'descartar') return guardarYSeguir('Descartar');
