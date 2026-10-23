@@ -1948,9 +1948,14 @@ function pintarFoco(A, N, R, bar){
     const s = A.series.find(x => x.key === FOCO.serie); if (!s) { FOCO = null; return renderAnalisis(); }
     const pts = s.items.map(r => [r, latlon(r)]).filter(x => x[1]);
     L.polyline(pts.map(x => x[1]), { color:'#D1495B', weight:2.5, dashArray:'6 6', opacity:.85 }).addTo(aLayers);
-    pts.forEach(([r, ll], i) => pin(ll, i + 1, COLOR[val(r,'delito')] || '#D1495B').bindPopup(() => popupHTML(r)).addTo(aLayers));
-    amap.fitBounds(L.latLngBounds(pts.map(x => x[1])).pad(0.35), { maxZoom:16 });
-    bar.innerHTML = `<span>Mostrando solo la serie <b>${esc(s.tipo)} · ${s.items.length} hechos</b> (${fmtF(s.desde)} a ${fmtF(s.hasta)}). Los números siguen el orden en que ocurrieron.</span><button class="btn sm primary" data-act="focoOff">Ver todo el mapa</button>`;
+    // hechos en el mismo lugar (menos de 30 m): un solo pin con todos sus números, para que no se tapen
+    const grupos = []; pts.forEach(([r, ll], i) => { const g = grupos.find(g => km(g.ll[0], g.ll[1], +ll[0], +ll[1]) < 0.03); if (g) g.m.push([r, i + 1]); else grupos.push({ ll: [+ll[0], +ll[1]], m: [[r, i + 1]] }); });
+    grupos.forEach(g => { const lab = g.m.map(x => x[1]).join(' y '), w = 22 + (lab.length - 1) * 7;
+      L.marker(g.ll, { icon: L.divIcon({ className:'', html:`<div class="numpin" style="background:${COLOR[val(g.m[0][0],'delito')] || '#D1495B'};width:${w}px;border-radius:11px">${lab}</div>`, iconSize:[w,22], iconAnchor:[w/2,11] }) })
+        .bindPopup(() => g.m.map(x => `<b>Hecho ${x[1]}</b>` + popupHTML(x[0])).join('<hr>')).addTo(aLayers); });
+    const juntos = grupos.filter(g => g.m.length > 1);
+    amap.fitBounds(L.latLngBounds(pts.map(x => x[1])).pad(0.2), { maxZoom:16, paddingTopLeft:[30, 170], paddingBottomRight:[30, 30] });
+    bar.innerHTML = `<span>Mostrando solo la serie <b>${esc(s.tipo)} · ${s.items.length} hechos</b> (${fmtF(s.desde)} a ${fmtF(s.hasta)}). Los números siguen el orden en que ocurrieron.${juntos.length ? ` ${juntos.map(g => `Los hechos ${g.m.map(x => x[1]).join(' y ')} son en el mismo lugar.`).join(' ')}` : ''}${s.items.length > pts.length ? ` ${s.items.length - pts.length} sin ubicación no se ven en el mapa.` : ''}</span><button class="btn sm primary" data-act="focoOff">Ver todo el mapa</button>`;
   } else if (FOCO.narco != null && N) {
     const g = N.grupos.find(x => x.i === FOCO.narco); if (!g) { FOCO = null; return renderAnalisis(); }
     L.circle(g.ll, { radius:R, color:COLOR.NARCOMENUDEO, weight:2, fillOpacity:.07, dashArray:'5 5', interactive:false }).addTo(aLayers);
