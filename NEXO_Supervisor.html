@@ -253,7 +253,7 @@ body.sup .tabs,body.sup #vCarga,body.sup .op-only{display:none!important}
     <div class="paq">
       <label class="btn" for="fileDes">Desarmaderos y autopartes (Excel)</label><input type="file" id="fileDes" accept=".xlsx,.xls" hidden>
       <label class="btn" for="filePro">Procedimientos (Excel)</label><input type="file" id="filePro" accept=".xlsx,.xls" hidden>
-      <label class="btn" for="fileBar">Barrios populares RENABAP (GeoJSON)</label><input type="file" id="fileBar" accept=".geojson,.json" hidden>
+      <label class="btn" for="fileBar">Barrios populares RENABAP (GeoJSON)</label><input type="file" id="fileBar" accept=".geojson,.json,.txt" hidden>
     </div>
     <div class="summary" id="capasEstado"></div><div class="summary" id="capasMsg"></div>
   </div>
@@ -780,6 +780,7 @@ const EXPORT_COLS = [
   ['Sexo víctima', r => val(r,'vsexo'), 'f.vsexo'], ['Edad víctima', r => val(r,'vedad'), 'f.vedad'], ['Resumen IA', r => r.ia?.resumen || '', 'ia.resumen'],
   ['Operador/a', r => r.f.oper, 'f.oper'], ['Estado registro', r => r.f.estado, 'f.estado'], ['Observaciones', r => r.f.obs, 'f.obs'],
   ['Minutos de carga', r => r.f.secs ? Math.round(r.f.secs/6)/10 : '', 'f.mins'], ['Última modificación', r => r.f.ts || '', 'f.ts'],
+  ...(MODO === 'supervisor' ? [['Tipo de día', r => tipoDia(fechaFinal(r))], ['Feriado', r => FERIADOS[fechaFinal(r)] || ''], ['Luz natural', r => contextoDe(r).luz || ''], ['Lluvia', r => contextoDe(r).lluvia || ''], ['Lluvia mm', r => contextoDe(r).mm ?? ''], ['Temperatura', r => contextoDe(r).temp != null ? Math.round(contextoDe(r).temp) : '']] : []),
 ];
 function hojaDe(aoa, fechasCols, cols){
   const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -1257,8 +1258,10 @@ function renderAnalisis(){
 
     <h3>Vehículos robados y hallados · ${conCruce.length} cruces</h3>
     ${A.cruces.length ? `<table class="t"><tr><th>Dominio</th><th>Robado</th><th>Hallado</th><th>Resultado</th></tr>${A.cruces.slice(0, 40).map(c => `<tr class="cl" data-cruce="${esc(c.dom)}"><td class="mono">${esc(c.dom)}<br><span class="hint">${esc(c.veh)}</span></td><td>${c.robo ? `<button class="nlink" onclick="event.stopPropagation();verDenuncia('${esc(c.robo.id)}')">N° ${c.robo.n}</button> ` + fmtF(fechaFinal(c.robo)) + '<br>' + esc(c.robo.localidad) : '—'}</td><td>${c.hall ? `<button class="nlink" onclick="event.stopPropagation();verDenuncia('${esc(c.hall.id)}')">N° ${c.hall.n}</button> ` + fmtF(fechaFinal(c.hall)) + '<br>' + esc(c.hall.localidad) : '—'}</td><td>${esc(c.resultado)}${c.dist != null ? `<br><span class="hint">${c.dist.toFixed(1)} km</span>` : ''}</td></tr>`).join('')}</table>` : '<p class="hint">Sin dominios cargados todavía.</p>'}
+    ${MODO === 'supervisor' ? contextoHTML(analisisContexto(base)) : ''}
   `;
   pintarMapa(geo, A, N, R, capa);
+  if (MODO === 'supervisor') asegurarClima(base).then(ch => { if (ch) reAnalisis(); });
 }
 function porComisariaHTML(base, A){
   const g = {};
@@ -1308,6 +1311,7 @@ function informe(tipo){
   <table class="t"><tr><th>Franja</th>${dias.map(d => `<th>${d.slice(0,3)}</th>`).join('')}</tr>${FRANJAS.map(f => `<tr><td>${f}</td>${dias.map(d => celda(fx[f + '|' + d])).join('')}</tr>`).join('')}</table>
   ${N ? `<h2>Alertas: venta de droga con violencia cerca · ${N.grupos.filter(g => g.alerta).length}</h2>${N.grupos.filter(g => g.alerta).length ? `<table class="t"><tr><th>Punto de venta</th><th>Denuncias</th><th>Violentos cerca</th><th>Heridos / homicidios</th><th>Comisaría</th></tr>${N.grupos.filter(g => g.alerta).sort((a,b) => b.heridos - a.heridos || b.violentos.length - a.violentos.length).map(g => `<tr><td>${esc(g.miembros[0].r.localidad)} · ${esc(g.miembros[0].r.calle)} ${esc(g.miembros[0].r.altura)}</td><td>${g.miembros.length}</td><td>${g.violentos.length}</td><td>${g.heridos || ''}</td><td>${esc(val(g.miembros[0].r,'comisaria').replace(/^CRIA\./,''))}</td></tr>`).join('')}</table><p class="hint">Radio: ${cuadras(R)} cuadras (${R} m).</p>` : '<p>Sin alertas.</p>'}` : ''}
   ${sinBotones(capasHTML(analisisCapas(A, N, R), R)).replace(/<h3([^>]*)>/g, '<h2>').replace(/<\/h3>/g, '</h2>')}
+  ${MODO === 'supervisor' ? sinBotones(contextoHTML(analisisContexto(base))).replace(/<h3([^>]*)>/g, '<h2>').replace(/<\/h3>/g, '</h2>') : ''}
   <h2>Posibles series (bandas) · ${series.length}</h2>
   ${series.length ? series.map((x, i) => `<div class="serie"><b>${i + 1}. ${esc(x.tipo)} · ${x.items.length} hechos</b>${SERIES_EST[x.key] === 'Confirmada' ? ' · <b style="color:#2C7A4B">CONFIRMADA</b>' : ''}${new Set(x.items.map(r => val(r,'comisaria')).filter(Boolean)).size > 1 ? ' · <b style="color:#B8620F">CRUZA JURISDICCIONES</b>' : ''}<br>
     ${esc(x.zona)} · del ${fmtF(x.desde)} al ${fmtF(x.hasta)}<br>En común: ${esc(x.rasgos || '—')}<br>Comisarías: ${esc([...new Set(x.items.map(r => val(r,'comisaria')).filter(Boolean))].join(' · ') || '—')}<br>
@@ -1614,6 +1618,179 @@ function capasHTML(C, R){
   return h;
 }
 
+/* =====================================================================
+   CONTEXTO: clima (Open-Meteo), luz natural y calendario
+   ===================================================================== */
+// Feriados nacionales y días no laborables con fines turísticos (editable: agregar años nuevos acá)
+const FERIADOS = {
+  '2025-01-01':'Año Nuevo','2025-03-03':'Carnaval','2025-03-04':'Carnaval','2025-03-24':'Día de la Memoria','2025-04-02':'Malvinas','2025-04-18':'Viernes Santo',
+  '2025-05-01':'Día del Trabajo','2025-05-02':'Puente turístico','2025-05-25':'Revolución de Mayo','2025-06-16':'Paso a la Inmortalidad de Güemes','2025-06-20':'Día de la Bandera',
+  '2025-07-09':'Día de la Independencia','2025-08-15':'Puente turístico','2025-08-17':'Paso a la Inmortalidad de San Martín','2025-10-12':'Día del Respeto a la Diversidad Cultural',
+  '2025-11-21':'Día de la Soberanía Nacional','2025-12-08':'Inmaculada Concepción','2025-12-25':'Navidad',
+  '2026-01-01':'Año Nuevo','2026-02-16':'Carnaval','2026-02-17':'Carnaval','2026-03-23':'Puente turístico','2026-03-24':'Día de la Memoria',
+  '2026-04-02':'Malvinas','2026-04-03':'Viernes Santo','2026-05-01':'Día del Trabajo','2026-05-25':'Revolución de Mayo','2026-06-15':'Paso a la Inmortalidad de Güemes',
+  '2026-06-20':'Día de la Bandera','2026-07-09':'Día de la Independencia','2026-07-10':'Puente turístico','2026-08-17':'Paso a la Inmortalidad de San Martín',
+  '2026-10-12':'Día del Respeto a la Diversidad Cultural','2026-11-23':'Día de la Soberanía Nacional','2026-12-07':'Puente turístico','2026-12-08':'Inmaculada Concepción','2026-12-25':'Navidad',
+};
+let CLIMA = null; // { porPartido: { P: { h: { 'YYYY-MM-DDTHH': [mm, temp] }, d0, d1 } } }
+let climaBuscando = false, climaError = '';
+const CLIMA_INTENTO = new Set();
+const centroP = p => { const b = BOX[normP(p)]; return b ? [(b[0] + b[1]) / 2, (b[2] + b[3]) / 2] : [-34.7, -58.5]; };
+const sumaDias = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+
+/* luz natural: salida y puesta del sol (algoritmo NOAA), en minutos de hora local (UTC-3) */
+function sol(iso, lat, lon){
+  const d = new Date(iso + 'T12:00:00'), n = Math.round((d - new Date(d.getFullYear(), 0, 0)) / 864e5), g = 2 * Math.PI / 365 * (n - 1);
+  const eq = 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g) - 0.014615 * Math.cos(2*g) - 0.040849 * Math.sin(2*g));
+  const de = 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g) - 0.006758 * Math.cos(2*g) + 0.000907 * Math.sin(2*g) - 0.002697 * Math.cos(3*g) + 0.00148 * Math.sin(3*g);
+  const r = Math.PI / 180, ha = Math.acos(Math.cos(90.833 * r) / (Math.cos(lat * r) * Math.cos(de)) - Math.tan(lat * r) * Math.tan(de)) / r;
+  return { sale: 720 - 4 * (lon + ha) - eq - 180, pone: 720 - 4 * (lon - ha) - eq - 180 };
+}
+function luzDe(iso, hhmm, partido){
+  if (!iso || !hhmm) return '';
+  const [la, lo] = centroP(partido), s = sol(iso, la, lo), m = parseInt(hhmm) * 60 + parseInt(hhmm.slice(3, 5));
+  if (Math.abs(m - s.sale) <= 40 || Math.abs(m - s.pone) <= 40) return 'Amanecer / atardecer';
+  return m > s.sale && m < s.pone ? 'Día' : 'Noche';
+}
+function tipoDia(iso){
+  if (!iso) return '';
+  if (FERIADOS[iso]) return 'Feriado';
+  const w = new Date(iso + 'T12:00:00').getDay();
+  if (w === 0 || w === 6) return (FERIADOS[sumaDias(iso, w === 6 ? -1 : -2)] || FERIADOS[sumaDias(iso, w === 0 ? 1 : 2)]) ? 'Fin de semana largo' : 'Fin de semana';
+  return 'Hábil';
+}
+
+/* clima: descarga por partido y guarda en esta computadora */
+async function asegurarClima(base, forzar){
+  if (climaBuscando) return false;
+  if (!CLIMA) { const c = (await capasDbGet()).find(x => x.id === 'clima'); CLIMA = c || { id:'clima', porPartido:{} }; }
+  const hoy = todayISO(), porP = {};
+  for (const r of base) { const f = fechaFinal(r); if (!f || r.fchk === 'FECHA DUDOSA' && !r.f.fecha1) continue; if (diasEntre(hoy, f) > 400 || diasEntre(hoy, f) < 0) continue; const p = normP(r.partido); (porP[p] ||= []).push(f); }
+  const tareas = [];
+  for (const [p, fs] of Object.entries(porP)) { fs.sort(); const d0 = fs[0], d1 = fs.at(-1), c = CLIMA.porPartido[p];
+    if (!forzar && c && c.d0 <= d0 && c.d1 >= d1 && (diasEntre(hoy, c.d1) > 6 || c.bajado === hoy)) continue; const k = p + d0 + d1; if (!forzar && CLIMA_INTENTO.has(k)) continue; CLIMA_INTENTO.add(k); tareas.push([p, d0, d1]); }
+  if (!tareas.length) return false;
+  climaBuscando = true; climaError = '';
+  for (const [p, d0, d1] of tareas) {
+    try {
+      const [la, lo] = centroP(p), h = (CLIMA.porPartido[p]?.h) || {};
+      const params = `latitude=${la.toFixed(3)}&longitude=${lo.toFixed(3)}&hourly=precipitation,temperature_2m&timezone=America%2FArgentina%2FBuenos_Aires`;
+      const finArchivo = diasEntre(hoy, d1) >= 6 ? d1 : sumaDias(hoy, -6);
+      if (d0 <= finArchivo) { const js = await (await fetch(`https://archive-api.open-meteo.com/v1/archive?${params}&start_date=${d0}&end_date=${finArchivo}`)).json();
+        (js.hourly?.time || []).forEach((t, i) => { if (js.hourly.precipitation[i] != null) h[t.slice(0, 13)] = [js.hourly.precipitation[i], js.hourly.temperature_2m[i]]; }); }
+      if (diasEntre(hoy, d1) < 14) { const js = await (await fetch(`https://api.open-meteo.com/v1/forecast?${params}&past_days=14&forecast_days=1`)).json();
+        (js.hourly?.time || []).forEach((t, i) => { if (js.hourly.precipitation[i] != null && !(t.slice(0, 13) in h)) h[t.slice(0, 13)] = [js.hourly.precipitation[i], js.hourly.temperature_2m[i]]; }); }
+      const prev = CLIMA.porPartido[p];
+      CLIMA.porPartido[p] = { h, d0: prev && prev.d0 < d0 ? prev.d0 : d0, d1: prev && prev.d1 > d1 ? prev.d1 : d1, bajado: hoy };
+    } catch(e){ climaError = 'No se pudo descargar el clima (¿sin internet?).'; }
+  }
+  await capasDbPut(CLIMA); climaBuscando = false;
+  return true;
+}
+// condición de lluvia en una hora: máximo de la hora anterior, la del hecho y la siguiente
+function lluviaHora(p, iso, hh){
+  const c = CLIMA?.porPartido?.[normP(p)]; if (!c) return null;
+  const k = i => { const d = new Date(`${iso}T${pad(hh)}:00:00`); d.setHours(d.getHours() + i); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}`; };
+  const v = [-1, 0, 1].map(i => c.h[k(i)]).filter(Boolean); if (!v.length) return null;
+  return { mm: Math.max(...v.map(x => x[0])), temp: c.h[k(0)]?.[1] ?? v[0][1] };
+}
+const condLluvia = mm => mm == null ? '' : mm >= 2 ? 'Lluvia fuerte' : mm >= 0.2 ? 'Lluvia leve' : 'Seco';
+const bandaTemp = t => t == null ? '' : t < 10 ? 'Frío (menos de 10°)' : t < 20 ? 'Templado (10° a 20°)' : t < 28 ? 'Cálido (20° a 28°)' : 'Calor (28° o más)';
+function contextoDe(r){
+  const f = fechaFinal(r), h = horaFinal(r), out = { dia: tipoDia(f), feriado: FERIADOS[f] || '', luz: luzDe(f, h, r.partido) };
+  if (f && h) { const l = lluviaHora(r.partido, f, parseInt(h)); if (l) { out.mm = l.mm; out.lluvia = condLluvia(l.mm); out.temp = l.temp; } }
+  if (f && CLIMA?.porPartido?.[normP(r.partido)]) { let s = 0, any = false; for (let i = 0; i < 24; i++) { const v = CLIMA.porPartido[normP(r.partido)].h[`${f}T${pad(i)}`]; if (v) { s += v[0]; any = true; } } if (any) out.mmDia = Math.round(s * 10) / 10; }
+  return out;
+}
+function contextoTexto(r){
+  const c = contextoDe(r), p = [];
+  if (c.lluvia) p.push(c.lluvia === 'Seco' ? 'sin lluvia' : `${c.lluvia.toLowerCase()} (${c.mm.toFixed(1)} mm)`);
+  else if (c.mmDia != null) p.push(c.mmDia >= 1 ? `llovió ese día (${c.mmDia} mm)` : 'día sin lluvia');
+  if (c.temp != null) p.push(`${Math.round(c.temp)}°`);
+  if (c.luz) p.push(c.luz.toLowerCase());
+  if (c.feriado) p.push(`feriado: ${c.feriado}`); else if (c.dia && c.dia !== 'Hábil') p.push(c.dia.toLowerCase());
+  return p.join(' · ');
+}
+
+/* análisis de contexto */
+function analisisContexto(base){
+  // solo desde la primera fecha de carga: los hechos anteriores llegan incompletos (se denuncian tarde)
+  const cargas = base.map(r => r.fcarga).filter(Boolean).sort(), desde = cargas[0] || '';
+  const conHora = base.filter(r => fechaFinal(r) && fechaFinal(r) >= desde && horaFinal(r) && (r.fchk === 'OK' || r.f.fecha1 || r.f.hora1) && val(r,'delito') !== 'NARCOMENUDEO');
+  const fechas = conHora.map(fechaFinal).sort(); if (!fechas.length) return null;
+  const d0 = fechas[0], d1 = fechas.at(-1), nDias = diasEntre(d1, d0) + 1;
+  const partidos = [...new Set(conHora.map(r => normP(r.partido)))];
+  const hayClima = partidos.some(p => CLIMA?.porPartido?.[p]);
+  // exposición: horas de cada condición en el período, por partido
+  const expo = { lluvia: {}, temp: {}, luz: {} };
+  const suma = (o, k) => o[k] = (o[k] || 0) + 1;
+  for (const p of partidos) for (let d = d0; d <= d1; d = sumaDias(d, 1)) for (let h = 0; h < 24; h++) {
+    const hh = `${pad(h)}:30`; suma(expo.luz, luzDe(d, hh, p));
+    if (hayClima) { const l = lluviaHora(p, d, h); if (l) { suma(expo.lluvia, condLluvia(l.mm) === 'Seco' ? 'Seco' : 'Con lluvia'); suma(expo.temp, bandaTemp(l.temp)); } }
+  }
+  const grupos = r => { const d = val(r,'delito'), m = val(r,'modal'); return ['Todos', d, m ? `${d} · ${m}` : null].filter(Boolean); };
+  const cuenta = { lluvia: {}, temp: {}, luz: {} };
+  for (const r of conHora) { const c = contextoDe(r); for (const g of grupos(r)) {
+    if (c.lluvia) { const k = c.lluvia === 'Seco' ? 'Seco' : 'Con lluvia'; ((cuenta.lluvia[g] ||= {})[k] = (cuenta.lluvia[g][k] || 0) + 1); }
+    if (c.temp != null) { const k = bandaTemp(c.temp); ((cuenta.temp[g] ||= {})[k] = (cuenta.temp[g][k] || 0) + 1); }
+    if (c.luz) ((cuenta.luz[g] ||= {})[c.luz] = (cuenta.luz[g][c.luz] || 0) + 1); } }
+  // calendario: hechos por día según tipo de día y momento del mes
+  const todos = base.filter(r => fechaFinal(r) && fechaFinal(r) >= d0 && fechaFinal(r) <= d1 && val(r,'delito') !== 'NARCOMENUDEO');
+  const diasTipo = {}, diasMes = { 'Días 1 a 5': 0, 'Resto del mes': 0 };
+  for (let d = d0; d <= d1; d = sumaDias(d, 1)) { suma(diasTipo, tipoDia(d)); diasMes[+d.slice(8) <= 5 ? 'Días 1 a 5' : 'Resto del mes']++; }
+  const cal = {}, mes = {};
+  for (const r of todos) { const f = fechaFinal(r), t = tipoDia(f), mm = +f.slice(8) <= 5 ? 'Días 1 a 5' : 'Resto del mes';
+    for (const g of grupos(r)) { ((cal[g] ||= {})[t] = (cal[g][t] || 0) + 1); ((mes[g] ||= {})[mm] = (mes[g][mm] || 0) + 1); } }
+  // semana con contexto: última semana vs. base anterior (mínimo 21 días de base)
+  let semana = null;
+  if (hayClima && nDias >= 28) {
+    const ini = sumaDias(d1, -6), baseR = conHora.filter(r => fechaFinal(r) < ini), ult = conHora.filter(r => fechaFinal(r) >= ini);
+    const horas = (a, b) => { const o = { Seco:0, 'Con lluvia':0 }; for (const p of partidos) for (let d = a; d <= b; d = sumaDias(d, 1)) for (let h = 0; h < 24; h++) { const l = lluviaHora(p, d, h); if (l) o[condLluvia(l.mm) === 'Seco' ? 'Seco' : 'Con lluvia']++; } return o; };
+    const hb = horas(d0, sumaDias(ini, -1)), hu = horas(ini, d1);
+    semana = ['Todos', 'ROBO', 'AUTOMOTOR', 'HURTO'].map(g => {
+      const inG = r => g === 'Todos' || val(r,'delito') === g;
+      const cb = { Seco:0, 'Con lluvia':0 }; baseR.filter(inG).forEach(r => { const c = contextoDe(r); if (c.lluvia) cb[c.lluvia === 'Seco' ? 'Seco' : 'Con lluvia']++; });
+      const tasaS = hb.Seco ? cb.Seco / hb.Seco : 0, tasaL = hb['Con lluvia'] ? cb['Con lluvia'] / hb['Con lluvia'] : tasaS, tasaT = (hb.Seco + hb['Con lluvia']) ? (cb.Seco + cb['Con lluvia']) / (hb.Seco + hb['Con lluvia']) : 0;
+      const obs = ult.filter(inG).length, esperado = tasaS * hu.Seco + tasaL * hu['Con lluvia'], sinClima = tasaT * (hu.Seco + hu['Con lluvia']);
+      return { g, obs, esperado, sinClima, horasLluvia: hu['Con lluvia'] / Math.max(1, partidos.length) };
+    }).filter(x => x.sinClima >= 5);
+    semana.ini = ini; semana.fin = d1;
+  }
+  return { d0, d1, nDias, hayClima, expo, cuenta, cal, diasTipo, mes, diasMes, semana, nHora: conHora.length };
+}
+function contextoHTML(X){
+  if (!X) return `<h3>Contexto: clima, luz y calendario</h3><p class="hint">Hacen falta hechos con fecha y hora confiables.</p>`;
+  const pct = v => { const n = Math.round(v * 100); return (n > 0 ? '+' : '') + n + '%'; };
+  const tasaTabla = (cuenta, expo, cols, titulo, unidad) => {
+    const filas = Object.entries(cuenta).filter(([g, o]) => Object.values(o).reduce((a,b)=>a+b,0) >= 12).sort((a,b) => (a[0] === 'Todos' ? -1 : b[0] === 'Todos' ? 1 : Object.values(b[1]).reduce((x,y)=>x+y,0) - Object.values(a[1]).reduce((x,y)=>x+y,0))).slice(0, 9);
+    if (!filas.length) return '';
+    const tasa = (o, k) => expo[k] ? (o[k] || 0) / expo[k] * 100 : null;
+    return `<p class="hint" style="margin:8px 0 3px"><b>${titulo}</b> (hechos cada 100 ${unidad})</p><table class="t"><tr><th>Delito</th>${cols.map(c => `<th>${c}</th>`).join('')}${cols.length === 2 ? '<th>Cambio</th>' : ''}</tr>${filas.map(([g, o]) => { const v = cols.map(c => tasa(o, c)); return `<tr><td>${esc(g)}</td>${v.map(x => `<td>${x == null ? '—' : x.toFixed(1)}</td>`).join('')}${cols.length === 2 && v[0] ? `<td><b>${pct(v[1] / v[0] - 1)}</b></td>` : cols.length === 2 ? '<td>—</td>' : ''}</tr>`; }).join('')}</table>`;
+  };
+  const porDia = (cuenta, dias, cols, titulo) => {
+    const filas = Object.entries(cuenta).filter(([g, o]) => Object.values(o).reduce((a,b)=>a+b,0) >= 12).sort((a,b) => (a[0] === 'Todos' ? -1 : b[0] === 'Todos' ? 1 : Object.values(b[1]).reduce((x,y)=>x+y,0) - Object.values(a[1]).reduce((x,y)=>x+y,0))).slice(0, 8);
+    const cs = cols.filter(c => dias[c]); if (!filas.length || cs.length < 2) return '';
+    return `<p class="hint" style="margin:8px 0 3px"><b>${titulo}</b> (hechos por día)</p><table class="t"><tr><th>Delito</th>${cs.map(c => `<th>${c}<br><span class="hint">${dias[c]} día${dias[c] > 1 ? 's' : ''}</span></th>`).join('')}</tr>${filas.map(([g, o]) => `<tr><td>${esc(g)}</td>${cs.map(c => `<td>${((o[c] || 0) / dias[c]).toFixed(1)}</td>`).join('')}</tr>`).join('')}</table>`;
+  };
+  let sem = '';
+  if (X.semana && X.semana.length) {
+    sem = `<div class="hallazgo-txt" style="margin-top:6px"><b>Semana del ${fmtF(X.semana.ini)} al ${fmtF(X.semana.fin)}, con el clima descontado:</b><br>${X.semana.map(s => {
+      const real = s.obs / s.sinClima - 1, clima = s.esperado / s.sinClima - 1, neto = s.obs / s.esperado - 1;
+      return `• <b>${s.g === 'Todos' ? 'Todos los hechos' : s.g}</b>: ${s.obs} hechos, ${pct(real)} contra lo habitual. ${Math.abs(clima) < 0.03 ? 'El clima de la semana no cambiaba lo esperado' : `Por el clima se esperaba ${pct(clima)}`}; descontando el clima, la variación real es <strong>${pct(neto)}</strong>.`; }).join('<br>')}
+      <br><span class="hint">Llovió unas ${Math.round(X.semana[0].horasLluvia)} horas en la semana.</span></div>`;
+  } else sem = `<p class="hint" style="margin-top:6px">El análisis “semana con el clima descontado” se activa con al menos 4 semanas de datos (hay ${X.nDias} días).</p>`;
+  return `<h3>Contexto: clima, luz y calendario</h3>
+    <p class="hint" style="margin:0 0 4px">Del ${fmtF(X.d0)} al ${fmtF(X.d1)} · ${X.nHora} hechos con hora confiable (se cuentan los ocurridos desde la primera carga; narcomenudeo queda afuera porque la hora no es la del hecho). ${X.hayClima ? 'Clima por hora de Open-Meteo, un punto por partido.' : climaBuscando ? 'Descargando el clima…' : (climaError || 'Sin datos de clima todavía.')} <button class="btn sm" data-act="climaAct">Actualizar clima</button></p>
+    ${X.nDias < 21 ? `<p class="hint" style="color:var(--signal)">Con ${X.nDias} días los números son orientativos: las tendencias se confirman con varias semanas.</p>` : ''}
+    ${sem}
+    ${X.hayClima ? tasaTabla(X.cuenta.lluvia, X.expo.lluvia, ['Seco','Con lluvia'], 'Lluvia', 'horas') : ''}
+    ${X.hayClima ? tasaTabla(X.cuenta.temp, X.expo.temp, ['Frío (menos de 10°)','Templado (10° a 20°)','Cálido (20° a 28°)','Calor (28° o más)'].filter(c => X.expo.temp[c]), 'Temperatura', 'horas') : ''}
+    ${tasaTabla(X.cuenta.luz, X.expo.luz, ['Día','Noche'], 'Luz natural', 'horas')}
+    ${porDia(X.cal, X.diasTipo, ['Hábil','Fin de semana','Fin de semana largo','Feriado'], 'Calendario')}
+    ${porDia(X.mes, X.diasMes, ['Días 1 a 5','Resto del mes'], 'Principio de mes (cobros)')}
+    <p class="hint">Se comparan tasas, no cantidades: si llovió pocas horas, hay pocos hechos con lluvia aunque la lluvia no cambie nada. Es contexto, no causa.</p>`;
+}
+
 function alertasHTML(N, R){
   if (!N) return '';
   const al = N.grupos.filter(g => g.alerta).sort((a,b) => b.heridos - a.heridos || b.violentos.length - a.violentos.length);
@@ -1694,7 +1871,7 @@ function verDenuncia(id){
     <div class="den" style="margin-top:12px">
       <div><table>
         ${fila('Fecha y hora', `${fmtF(fechaFinal(r))} ${horaFinal(r) || ''}${r.f.fecha1 || r.f.hora1 ? ' (corregida)' : ''}`)}
-        ${fila('Día / franja', `${diaDe(r)} · ${franjaDe(r)}`)}
+        ${fila('Día / franja', `${diaDe(r)} · ${franjaDe(r)}`)}${fila('Contexto', contextoTexto(r))}
         ${fila('Partido', r.partido)}${fila('Localidad', r.localidad)}${fila('Dirección', dirs)}
         ${fila('Ubicación', ll ? `${(+ll[0]).toFixed(5)}, ${(+ll[1]).toFixed(5)} (${coordEstado(r)[0].toLowerCase()})` : 'sin ubicación')}
         ${dato('Comisaría', 'comisaria')}${fila('Tomó la denuncia', r.dep)}${fila('Carátula original', r.cal)}
@@ -1830,6 +2007,7 @@ document.addEventListener('click', e => {
   }
   const a = t.dataset.act; if (!a) return;
   if (a === 'focoOff') { FOCO = null; pintarMapa._fit = false; return reAnalisis(); }
+  if (a === 'climaAct') { toast('Descargando el clima…'); return asegurarClima(baseAnalisis({ pend:true }), true).then(() => { reAnalisis(); toast(climaError || 'Clima actualizado.'); }); }
   if (a === 'save') return guardarYSeguir('Completo');
   if (a === 'consultar') return guardarYSeguir('Consultar');
   if (a === 'descartar') return guardarYSeguir('Descartar');
