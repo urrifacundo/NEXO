@@ -139,6 +139,7 @@ textarea.txt{min-height:44px;resize:vertical}
 .lgbtn{border:1px solid var(--line);background:var(--panel);border-radius:14px;padding:2px 9px 2px 6px;font-size:11.5px;display:inline-flex;align-items:center;gap:5px}
 .lgbtn i{display:inline-block;width:10px;height:10px;border-radius:50%}
 .lgbtn.off{opacity:.4;text-decoration:line-through}
+.z-lejos .zb2{display:none}
 .numpin{background:#D1495B;color:#fff;border:2px solid #fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font:700 11px Arial;box-shadow:0 1px 3px rgba(0,0,0,.4)}
 .aside{border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding:12px 14px 40px}
 .aside h3{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:16px 0 6px}
@@ -1260,7 +1261,7 @@ function renderAnalisis(){
       ${CAPAS.desarmaderos ? `<button class="lgbtn${OCULTOS.has('CAPA_DES') ? ' off' : ''}" data-lg="CAPA_DES"><i style="background:#3A3A3A;border-radius:2px"></i>Desarmaderos / autopartes</button>` : ''}
       ${CAPAS.procedimientos ? `<button class="lgbtn${OCULTOS.has('CAPA_ALL') ? ' off' : ''}" data-lg="CAPA_ALL"><i style="background:#fff;border:2px solid #2A9D6F;border-radius:2px;transform:rotate(45deg)"></i>Allanamientos por drogas</button>` : ''}
       ${CAPAS.barrios ? `<button class="lgbtn${OCULTOS.has('CAPA_BAR') ? ' off' : ''}" data-lg="CAPA_BAR"><i style="background:rgba(142,92,194,.35);border:1px solid #8E5CC2;border-radius:2px"></i>Barrios populares</button>` : ''}</div>` : ''}
-    <p class="hint">Tocá un delito para mostrarlo u ocultarlo en el mapa. Alrededor de cada punto de venta hay un círculo verde; cuando los círculos se tocan forman una sola <b style="color:#E07A1F">zona de venta</b> (naranja, 2 o 3 puntos; <b style="color:#B5172E">roja</b>, 4 o más).</p>
+    <p class="hint">Tocá un delito para mostrarlo u ocultarlo en el mapa. Alrededor de cada punto de venta hay un círculo verde; cuando los círculos se tocan forman una sola <b style="color:#E07A1F">zona de venta</b> (naranja, 2 o 3 puntos; <b style="color:#B5172E">roja</b>, 4 o más), con un número que indica cuántos puntos tiene. De lejos solo se numeran las rojas; al acercarte aparecen todas.</p>
     <p class="hint">${pend==='1' ? 'Los pendientes se cuentan con los valores sugeridos.' : ''} ${base.length - A.geo.length} hechos sin ubicación no aparecen en el mapa.</p>
 
     <h3>Posibles series (bandas) · ${A.series.length}</h3>
@@ -1989,12 +1990,16 @@ function zonasNarco(pts, R){
 const COLOR_ZONA = n => n >= 4 ? '#B5172E' : n >= 2 ? '#E07A1F' : COLOR.NARCOMENUDEO;
 function dibujarZonasNarco(pts, R){
   const panel = (nombre, op) => { if (!amap.getPane || !amap.createPane) return undefined; let p = amap.getPane(nombre); if (!p) { p = amap.createPane(nombre); p.style.zIndex = 390; p.style.pointerEvents = 'none'; } p.style.opacity = op; return nombre; };
-  const pz = panel('zonasNarco', 0.22);
+  const pz = panel('zonasNarco', 0.3);
+  const zoomCls = () => amap.getContainer && amap.getContainer().classList.toggle('z-lejos', amap.getZoom() < 14);
+  if (!dibujarZonasNarco._z && amap.on) { amap.on('zoomend', zoomCls); dibujarZonasNarco._z = true; } zoomCls();
   for (const z of zonasNarco(pts, R)) {
     if (z.n < 2) { z.m.forEach(x => L.circle(x.ll, { radius:R, color:COLOR.NARCOMENUDEO, weight:1, fillOpacity:.06, dashArray:'4 4', interactive:false }).addTo(aLayers)); continue; }
     // zona: todos los círculos en un mismo panel con opacidad de grupo, así se ven como una sola mancha pareja
     z.m.forEach(x => L.circle(x.ll, Object.assign({ radius:R, stroke:false, fillColor:COLOR_ZONA(z.n), fillOpacity: pz ? 1 : .12, interactive:false }, pz ? { pane: pz } : {})).addTo(aLayers));
-    L.marker(z.ll, { icon: L.divIcon({ className:'', html:`<div style="transform:translate(-50%,-50%);display:inline-block;white-space:nowrap;background:${COLOR_ZONA(z.n)};color:#fff;font:700 11px Arial;padding:2px 7px;border-radius:10px;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)">Zona de venta · ${z.n} puntos</div>`, iconSize:[0,0] }) })
+    const s = Math.min(30, 18 + z.n * 1.5);
+    L.marker(z.ll, { icon: L.divIcon({ className: z.n >= 4 ? 'zb zb4' : 'zb zb2', html:`<div style="width:${s}px;height:${s}px;background:${COLOR_ZONA(z.n)};color:#fff;font:700 ${s > 22 ? 12 : 11}px Arial;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.45)">${z.n}</div>`, iconSize:[s + 4, s + 4], iconAnchor:[(s + 4) / 2, (s + 4) / 2] }) })
+      .bindTooltip(`Zona de venta · ${z.n} puntos seguidos`, { direction:'top', offset:[0, -s / 2] })
       .bindPopup(`<b>Zona de venta con ${z.n} puntos seguidos</b><br>${z.m.length} denuncias de venta. Sus radios de ${R} m se tocan: funcionan como un mismo territorio.<br><span style="color:#666">${[...new Set(z.m.map(x => x.r.localidad))].join(' · ')}</span>`).addTo(aLayers);
   }
 }
