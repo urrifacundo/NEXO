@@ -546,6 +546,7 @@ function sugKeyword(r, k, d, m){
   if (k === 'dom') { const mm = String(r.relato||'').toUpperCase().match(/(DOMINIO|PATENTE|CHAPA PATENTE)\s*(COLOCAD[OA]\s*)?(N[°º]?\s*)?([A-Z]{2}\s?-?\d{3}\s?-?[A-Z]{2}|[A-Z]{3}\s?-?\d{3}|[A-Z]\d{3}\s?[A-Z]{3}|\d{3}\s?[A-Z]{3})\b/);
     return mm ? { v: normDom(mm[4]), why: '«' + mm[0].slice(0,30) + '»' } : null; }
   if (k === 'vehiculo') { const mm = t.match(/marca\s+([a-z]+)[,\s]+(modelo\s+)?([a-z0-9 ]{2,24}?)[,\s]+(de\s+)?color\s+([a-z]+)/);
+    if (mm && (MARCAS_TEL.test(mm[1]) || /celular|telefono|movil|smartphone|equipo|tablet|notebook|reloj|bicicleta/.test(t.slice(Math.max(0, mm.index - 70), mm.index)))) return null;
     return mm ? { v: `${mm[1]} ${mm[3]} ${mm[5]}`.replace(/\b\w/g, c => c.toUpperCase()), why: '«' + mm[0].slice(0,40) + '»' } : null; }
   if (k === 'fecha') { const mm = t.match(/a los (\d{1,2}) dias? del mes de (\w+)[, ]+(del )?(ano )?(\d{4})?/); if (mm && MESES[mm[2]]) { const y = mm[5] || (r.fcarga || todayISO()).slice(0,4); return { v:`${y}-${pad(MESES[mm[2]])}-${pad(mm[1])}`, why:'la fecha del acta' }; } return null; }
   if (k === 'hora') { const all = [...t.matchAll(/siendo (aproximadamente |aprox\.? )?las (\d{1,2})[:.,](\d{2})/g)]; const j = t.search(/denuncia\s*:|manifiesta que|refiere que/);
@@ -648,6 +649,8 @@ let idb = null;
 function openDB(){ return new Promise(res => { try { const r = indexedDB.open('radar_' + MODO, 2); r.onupgradeneeded = () => { const db = r.result; if (!db.objectStoreNames.contains('rec')) db.createObjectStore('rec', { keyPath:'id' }); if (!db.objectStoreNames.contains('capas')) db.createObjectStore('capas', { keyPath:'id' }); }; r.onsuccess = () => { idb = r.result; res(true); }; r.onerror = () => res(false); } catch(e){ res(false); } }); }
 function dbAll(){ return new Promise(res => { if(!idb) return res([]); try{ const q = idb.transaction('rec').objectStore('rec').getAll(); q.onsuccess=()=>res(q.result||[]); q.onerror=()=>res([]);}catch(e){res([]);} }); }
 const limpio = r => { const { _t, _s, ...x } = r; return x; };
+function dbDel(ids){ return new Promise(res => { if(!idb || !ids.length) return res(false); try{ const tx = idb.transaction('rec','readwrite'); const st = tx.objectStore('rec'); ids.forEach(id => st.delete(id)); tx.oncomplete = () => res(true); tx.onerror = () => res(false); } catch(e){ res(false); } }); }
+const ippN = s => String(s || '').replace(/\s/g, '').toUpperCase();
 function dbPut(list){ return new Promise(res => { if(!idb) return res(false); try{ const tx = idb.transaction('rec','readwrite'); const st = tx.objectStore('rec'); list.forEach(r=>st.put(limpio(r))); tx.oncomplete=()=>res(true); tx.onerror=()=>res(false);}catch(e){res(false);} }); }
 
 /* ===================== estado ===================== */
@@ -710,7 +713,7 @@ async function cargarCrudo(file){
   const conIA = Object.keys(rows[0]).some(k => /^IA_/i.test(k));
   LAST_ROWS = rows;
   const ps = new Set(op.partidos.map(normP));
-  const porPartido = {}; let mis = 0, utiles = 0, excl = 0, nuevos = 0, ya = 0;
+  const porPartido = {}, huerfanos = []; let mis = 0, utiles = 0, excl = 0, nuevos = 0, ya = 0;
   const lote = [];
   for (const x of rows){
     const P = normP(x.partido_hecho); porPartido[P] = (porPartido[P]||0) + 1;
@@ -719,7 +722,7 @@ async function cargarCrudo(file){
     const iaDel = x.IA_delito ? String(x.IA_delito).toUpperCase().trim() : '';
     if (iaDel === 'DESCARTAR' || (!c.cat && !(iaDel && DELITOS.includes(iaDel)))) { excl++; continue; }
     utiles++;
-    const id = String(x.delito_id ?? x.ipp ?? x.nro_registro);
+    const id = String(x.delito_id ?? x.ipp ?? x.nro_registro).trim();
     const fecha = toISODate(x.fecha_inicio_hecho), hora = toHHMM(x.hora_inicio_hecho), fcarga = toISODate(x.fecha_carga);
     const lat0 = num(x.latitud), lon0 = num(x.longitud);
     const ia = conIA ? { delito: DELITOS.includes(iaDel) ? iaDel : '', modalidad: x.IA_modalidad || '', resumen: x.IA_resumen || '', alertas: x.IA_alertas || '',
@@ -729,12 +732,14 @@ async function cargarCrudo(file){
       victima_sexo: x.IA_victima_sexo || '', victima_edad: x.IA_victima_edad || '', autores_sexo: x.IA_autores_sexo || '', autores_menores: x.IA_autores_menores || '' } : null;
     const base = { id, ipp: x.ipp || '', fecha, hora, fcarga, partido: P, localidad: x.localidad_hecho || '', calle: x.calle || '', altura: x.altura ?? '', entre: x.entre || '',
       dep: x.dependencia || '', cal: c.limpia, relato: x.relato || '', lat0, lon0, chk: coordCheck(lat0, lon0, P), fchk: fechaCheck(fecha, hora, fcarga), cal0: { cat:c.cat, mod:c.mod, why:c.why, veh:c.veh }, ia };
-    const prev = RECS.get(id);
+    let prev = RECS.get(id);
+    if (!prev && base.ipp) { const h = [...RECS.values()].find(q => !q.relato && q.id !== id && ippN(q.ipp) === ippN(base.ipp) && (!q.f.delito || !c.cat || q.f.delito === c.cat)); if (h) { RECS.delete(h.id); huerfanos.push(h.id); h.id = id; RECS.set(id, h); prev = h; } }
     if (prev) { ya++; Object.assign(prev, base); delete prev._s; delete prev._t; lote.push(prev); continue; }
     nuevos++;
     base.f = { estado:'Pendiente', coord: base.chk === 'OK' ? 'OK' : '' };
     RECS.set(id, base); lote.push(base);
   }
+  if (huerfanos.length) await dbDel(huerfanos);
   marcarCoordenadas(lote); _comis = null;
   for (const r of lote) if (r.alertCoord && r.f.coord === 'OK' && r.f.estado === 'Pendiente') r.f.coord = '';
   let maxN = Math.max(0, ...[...RECS.values()].map(r => r.n || 0));
@@ -795,7 +800,7 @@ function exportar(){
   if (!window.XLSX) return toast('No se pudo cargar el generador de Excel. Revisá la conexión y recargá.');
   const recs = mios().sort((a,b) => a.n - b.n);
   const aoa = [EXPORT_COLS.map(c => c[0])];
-  for (const r of recs) aoa.push(EXPORT_COLS.map(([h,fn]) => { const v = fn(r); if ((h === 'LAT' || h === 'LON' || h === 'Altura') && v !== '' && v != null && !isNaN(+v)) return +v; return v ?? ''; }));
+  for (const r of recs) { const vis = camposVisibles(r); aoa.push(EXPORT_COLS.map(([h,fn,k]) => { const kk = k && k.startsWith('f.') ? k.slice(2) : ''; const v = kk && vis[kk] === false ? (r.f[kk] || '') : fn(r); if ((h === 'LAT' || h === 'LON' || h === 'Altura') && v !== '' && v != null && !isNaN(+v)) return +v; return v ?? ''; })); }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, hojaDe(aoa, [3, 7]), 'CARGA');
   const A = MODO === 'supervisor' ? analizar(baseAnalisis({ todos:true })) : { series: [], cruces: [] };
@@ -821,7 +826,8 @@ async function importarAvance(files){
     let rows; try { const wb = await leerArchivo(file); rows = filasDe(wb, wb.Sheets['CARGA'] ? 'CARGA' : null); } catch(e){ return msgImport(e.message || String(e), true); }
     if (!rows.length || !('ID delito' in rows[0]) || !('DELITO' in rows[0])) return msgImport(`“${file.name}” no es un Excel de avance de NEXO. Si es un paquete o un crudo, cargalo arriba, en el paso 2.`, true);
     for (const x of rows){
-      const id = String(x['ID delito']); let r = RECS.get(id);
+      const id = String(x['ID delito']).trim(); let r = RECS.get(id);
+      if (!r && x.IPP) r = [...RECS.values()].find(q => q.relato && ippN(q.ipp) === ippN(x.IPP) && (!x.DELITO || val(q,'delito') === x.DELITO || q.cal0?.cat === x.DELITO));
       if (!r) { const lat = num(x.LAT), lon = num(x.LON), P = normP(x.Partido);
         r = { id, ipp: x.IPP || '', fecha: toISODate(x['Fecha hecho']), hora: toHHMM(x['Hora hecho']), fcarga: toISODate(x['Fecha carga']), partido: P, localidad: x.Localidad || '', calle: x.Calle || '',
           altura: x.Altura ?? '', entre: x['Esquina / entre'] || '', dep: x.Dependencia || '', cal: x['Carátula original'] || '', relato: '', lat0: lat, lon0: lon,
@@ -835,6 +841,7 @@ async function importarAvance(files){
         r.f[kk] = v == null ? '' : String(v);
       }
       if (r.fecha !== toISODate(x['Fecha hecho']) && x['Fecha hecho']) r.f.fecha1 = toISODate(x['Fecha hecho']);
+      limpiarSugeridos(r);
       ok++; lote.push(r);
     }
   }
@@ -928,6 +935,17 @@ function renderReader(){
 }
 
 /* ---------- ficha ---------- */
+const MARCAS_TEL = /^(xiaomi|redmi|poco|samsung|motorola|moto|iphone|apple|huawei|honor|alcatel|tcl|nokia|lg|zte|oppo|realme|vivo|tecno|infinix|lenovo|sony|blu|noblex|philco|bgh|tablet)$/;
+/* los campos que solo valen para ciertos delitos: un valor sugerido en un campo que no corresponde no se guarda ni se exporta */
+function camposVisibles(r){ const v = visibles(r); return { naut:v.autores, movil:v.autores, desc:v.autores, asexo:v.autores, amenor:v.autores, vsexo:v.victima, vedad:v.victima, arma:v.arma, ingreso:v.ingreso, obj:v.obj, tveh:v.veh, vehiculo:v.veh, dom:v.veh, chasis:v.veh, motor:v.veh, estadoh:v.estadoh }; }
+// borra valores que son solo sugerencias y quedaron guardados como si alguien los hubiera confirmado (pasaba al importar avances)
+function limpiarSugeridos(r){
+  const pend = (r.f.estado || 'Pendiente') === 'Pendiente', vis = camposVisibles(r); let cambio = false;
+  const igualSug = k => { delete r._s; delete r._t; const s = sug(r, k); return s && s.v != null && String(s.v) === String(r.f[k]); };
+  for (const k of [...Object.keys(vis), 'aprh', 'comisaria']) if (r.f[k] && (vis[k] === false || (pend && igualSug(k)))) { delete r.f[k]; cambio = true; }
+  if (pend) for (const k of ['modal', 'delito']) if (r.f[k] && igualSug(k)) { delete r.f[k]; cambio = true; }
+  delete r._s; delete r._t; return cambio;
+}
 function visibles(r){
   const d = val(r,'delito'), m = val(r,'modal'), auto = d === 'AUTOMOTOR';
   const autores = ['ROBO','HURTO','HOMICIDIO','OTROS GRAVES','ARMAS'].includes(d) || (auto && m === 'Asalto') || (d === 'ESTAFA' && (m === 'Cuento del tío' || m === 'Compraventa'));
@@ -2197,6 +2215,7 @@ window.addEventListener('beforeunload', () => { guardarTiempo(); const r = RECS.
   document.body.classList.add(MODO === 'operadora' ? 'op' : 'sup');
   await openDB();
   (await dbAll()).forEach(r => { if (!r.cal0) r.cal0 = { cat:null, mod:'', why:'', veh:[] }; RECS.set(r.id, r); });
+  if (MODO === 'supervisor') { const sucios = []; for (const r of RECS.values()) { try { if (limpiarSugeridos(r)) sucios.push(r); } catch(e){} } if (sucios.length) await dbPut(sucios); }
   (await capasDbGet()).forEach(c => { CAPAS[c.id] = c; }); renderCapasSetup();
   if (!window.XLSX) msgSetup('No se pudo cargar el lector de Excel desde internet. Revisá la conexión y recargá (F5).', true);
   renderSetup();
