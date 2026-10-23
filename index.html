@@ -1089,7 +1089,39 @@ function mover(d){ const list = filtrados(); if (!list.length) return; let i = l
 /* ===================== análisis ===================== */
 function baseAnalisis(opt){
   const o = opt || filtrosAnalisis();
-  return mios().filter(r => (r.f.estado || 'Pendiente') !== 'Descartar' && (o.todos || o.pend || r.f.estado === 'Completo') && val(r,'delito'));
+  const vivos = mios().filter(r => (r.f.estado || 'Pendiente') !== 'Descartar' && val(r,'delito'));
+  marcarRepetidos(vivos);
+  return vivos.filter(r => !r._rep && (o.todos || o.pend || r.f.estado === 'Completo'));
+}
+/* el mismo hecho cargado dos veces en el sistema: misma IPP y mismo delito, o mismo día, misma hora (±30 min), mismo lugar (≤150 m) y mismo delito.
+   Se cuenta una sola vez: queda el registro completo o el que tiene relato. */
+let REPETIDOS = [];
+function marcarRepetidos(recs){
+  const par = new Map(recs.map(r => [r.id, r.id])), find = id => { while (par.get(id) !== id) id = par.get(id); return id; };
+  const unir = (a, b) => { const x = find(a.id), y = find(b.id); if (x !== y) par.set(y, x); };
+  const porIpp = {}; recs.forEach(r => { delete r._rep; const k = String(r.ipp || '').replace(/\s/g, '').toUpperCase(); if (k.length >= 6) (porIpp[k + '|' + val(r,'delito')] ||= []).push(r); });
+  Object.values(porIpp).forEach(g => g.slice(1).forEach(x => unir(g[0], x)));
+  const porDia = {}; recs.forEach(r => { const f = fechaFinal(r); if (f && !r.f.nodup) (porDia[normP(r.partido) + f + val(r,'delito')] ||= []).push(r); });
+  const mins = h => h ? parseInt(h) * 60 + parseInt(h.slice(3, 5)) : null;
+  for (const g of Object.values(porDia)) for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length; j++) {
+    const a = g[i], b = g[j], la = latlon(a), lb = latlon(b); if (!la || !lb) continue;
+    const d = km(+la[0], +la[1], +lb[0], +lb[1]), ma = mins(horaFinal(a)), mb = mins(horaFinal(b));
+    if (ma != null && mb != null ? (Math.abs(ma - mb) > 30 || d > 0.15) : d > 0.05) continue;
+    const da = normDom(val(a,'dom')), db = normDom(val(b,'dom')); if (da.length >= 6 && db.length >= 6 && da !== db) continue;
+    const msa = val(a,'modal'), msb = val(b,'modal'); if (msa && msb && msa !== msb) continue;
+    unir(a, b);
+  }
+  const grupos = {}; recs.forEach(r => (grupos[find(r.id)] ||= []).push(r));
+  const calidad = r => (r.f.estado === 'Completo' ? 1e7 : 0) + (r.f.estado === 'Descartar' ? -1e8 : 0) + String(r.relato || '').length * 10 - (r.n || 0) / 1e6;
+  REPETIDOS = [];
+  for (const g of Object.values(grupos)) if (g.length > 1) { g.sort((a, b) => calidad(b) - calidad(a)); g.slice(1).forEach(x => x._rep = g[0].id); REPETIDOS.push(g); }
+}
+function repetidosHTML(){
+  if (!REPETIDOS.length) return '';
+  return `<h3>Hechos repetidos en el sistema · ${REPETIDOS.length}</h3>
+    <p class="hint" style="margin:0 0 6px">El mismo hecho aparece dos veces en el crudo (misma IPP, o mismo día, hora, lugar y delito). Se cuenta una sola vez en todo el análisis: queda el que tiene la denuncia completa.</p>
+    <table class="t"><tr><th>Se cuenta</th><th>Repetido</th><th>Hecho</th><th></th></tr>${REPETIDOS.slice(0, 25).map(g => `<tr><td><button class="nlink" onclick="verDenuncia('${esc(g[0].id)}')">N° ${g[0].n}</button></td><td>${g.slice(1).map(x => `<button class="nlink" onclick="verDenuncia('${esc(x.id)}')">N° ${x.n}</button>`).join(' ')}</td><td>${fmtF(fechaFinal(g[0]))} ${esc(horaFinal(g[0]) || '')} · ${esc(val(g[0],'modal') || val(g[0],'delito'))}<br><span class="hint">${esc(g[0].calle)} ${esc(g[0].altura)}</span></td><td><button class="chip" data-act="norep" data-v="${esc(g.map(x => x.id).join('|'))}">No son el mismo</button></td></tr>`).join('')}</table>
+    ${REPETIDOS.length > 25 ? `<p class="hint">Y ${REPETIDOS.length - 25} más.</p>` : ''}`;
 }
 function filtrosAnalisis(){ return { pend: ($('#aPend')?.value ?? '1') === '1' }; }
 function rasgos(r){
@@ -1228,7 +1260,7 @@ function renderAnalisis(){
       ${CAPAS.desarmaderos ? `<button class="lgbtn${OCULTOS.has('CAPA_DES') ? ' off' : ''}" data-lg="CAPA_DES"><i style="background:#3A3A3A;border-radius:2px"></i>Desarmaderos / autopartes</button>` : ''}
       ${CAPAS.procedimientos ? `<button class="lgbtn${OCULTOS.has('CAPA_ALL') ? ' off' : ''}" data-lg="CAPA_ALL"><i style="background:#fff;border:2px solid #2A9D6F;border-radius:2px;transform:rotate(45deg)"></i>Allanamientos por drogas</button>` : ''}
       ${CAPAS.barrios ? `<button class="lgbtn${OCULTOS.has('CAPA_BAR') ? ' off' : ''}" data-lg="CAPA_BAR"><i style="background:rgba(142,92,194,.35);border:1px solid #8E5CC2;border-radius:2px"></i>Barrios populares</button>` : ''}</div>` : ''}
-    <p class="hint">Tocá un delito para mostrarlo u ocultarlo en el mapa.</p>
+    <p class="hint">Tocá un delito para mostrarlo u ocultarlo en el mapa. Alrededor de cada punto de venta hay un círculo verde; cuando los círculos se tocan forman una sola <b style="color:#E07A1F">zona de venta</b> (naranja, 2 o 3 puntos; <b style="color:#B5172E">roja</b>, 4 o más).</p>
     <p class="hint">${pend==='1' ? 'Los pendientes se cuentan con los valores sugeridos.' : ''} ${base.length - A.geo.length} hechos sin ubicación no aparecen en el mapa.</p>
 
     <h3>Posibles series (bandas) · ${A.series.length}</h3>
@@ -1258,6 +1290,7 @@ function renderAnalisis(){
 
     <h3>Vehículos robados y hallados · ${conCruce.length} cruces</h3>
     ${A.cruces.length ? `<table class="t"><tr><th>Dominio</th><th>Robado</th><th>Hallado</th><th>Resultado</th></tr>${A.cruces.slice(0, 40).map(c => `<tr class="cl" data-cruce="${esc(c.dom)}"><td class="mono">${esc(c.dom)}<br><span class="hint">${esc(c.veh)}</span></td><td>${c.robo ? `<button class="nlink" onclick="event.stopPropagation();verDenuncia('${esc(c.robo.id)}')">N° ${c.robo.n}</button> ` + fmtF(fechaFinal(c.robo)) + '<br>' + esc(c.robo.localidad) : '—'}</td><td>${c.hall ? `<button class="nlink" onclick="event.stopPropagation();verDenuncia('${esc(c.hall.id)}')">N° ${c.hall.n}</button> ` + fmtF(fechaFinal(c.hall)) + '<br>' + esc(c.hall.localidad) : '—'}</td><td>${esc(c.resultado)}${c.dist != null ? `<br><span class="hint">${c.dist.toFixed(1)} km</span>` : ''}</td></tr>`).join('')}</table>` : '<p class="hint">Sin dominios cargados todavía.</p>'}
+    ${MODO === 'supervisor' ? repetidosHTML() : ''}
     ${MODO === 'supervisor' ? contextoHTML(analisisContexto(base)) : ''}
   `;
   pintarMapa(geo, A, N, R, capa);
@@ -1600,8 +1633,8 @@ function capasHTML(C, R){
     const al = C.des.filter(z => z.alerta);
     h += `<h3>Circuito automotor: desarmaderos y autopartes</h3>
       ${C.desRatio ? `<div class="hallazgo-txt">De los <strong>${C.desRatio.hall}</strong> vehículos hallados, <strong>${C.desRatio.cerca}</strong> aparecieron a menos de 1 km de un desarmadero, taller o comercio de autopartes registrado, que ocupan el <strong>${Math.round(C.desRatio.sa * 100)}%</strong> de la superficie. De los ${C.desRatio.lev} levantamientos, ${C.desRatio.levCerca} fueron a menos de 1 km.</div>` : ''}
-      <p class="hint" style="margin-top:6px">En alerta: con al menos un hallazgo desarmado o sin partes, o 3 o más hallazgos a menos de 1 km.</p>
-      <table class="t"><tr><th>Lugar</th><th>Hallazgos</th><th>Desarm.</th><th>Levant.</th><th>Asaltos</th></tr>${C.des.filter(z => z.cerca.length).slice(0, 12).map(z => `<tr class="cl" data-goto="${z.d.ll[0]},${z.d.ll[1]}"><td>${z.alerta ? '<span class="flag bad">ALERTA</span> ' : ''}${esc(z.d.tipo)} · ${esc(z.d.localidad)}<br><span class="hint">${esc(z.d.dir)} · habilitado: ${esc(z.d.hab || '—')}</span></td><td>${z.hall || ''}</td><td>${z.hallDes || ''}</td><td>${z.lev || ''}</td><td>${z.asal || ''}</td></tr>`).join('')}</table>
+      <p class="hint" style="margin-top:6px">En alerta: con al menos un hallazgo desarmado o sin partes, o 3 o más hallazgos a menos de 1 km. Tocá un lugar para verlo en el mapa con su radio de 1 km.</p>
+      <table class="t"><tr><th>Lugar</th><th>Hallazgos</th><th>Desarm.</th><th>Levant.</th><th>Asaltos</th></tr>${C.des.filter(z => z.cerca.length).slice(0, 12).map(z => `<tr class="cl" data-focodes="${C.des.indexOf(z)}"><td>${z.alerta ? '<span class="flag bad">ALERTA</span> ' : ''}${esc(z.d.tipo)} · ${esc(z.d.localidad)}<br><span class="hint">${esc(z.d.dir)} · habilitado: ${esc(z.d.hab || '—')}</span></td><td>${z.hall || ''}</td><td>${z.hallDes || ''}</td><td>${z.lev || ''}</td><td>${z.asal || ''}</td></tr>`).join('')}</table>
       ${al.length ? '' : '<p class="hint">Sin alertas por ahora: completar el “Estado al hallazgo” en los hallazgos ayuda a detectarlas.</p>'}`;
   }
   if (CAPAS.barrios && C.barRes) {
@@ -1867,6 +1900,7 @@ function verDenuncia(id){
       <div><h2 style="margin:0">N° ${r.n} · ${esc(val(r,'delito') || 'Sin clasificar')} · ${esc(val(r,'modal'))}</h2>
       <p class="hint" style="margin:3px 0 0">IPP ${esc(r.ipp)} · ID ${esc(r.id)} · <span class="flag ${est === 'Completo' ? 'ok' : est === 'Consultar' ? 'warn' : est === 'Descartar' ? 'bad' : 'info'}">${esc(est.toUpperCase())}</span>${r.f.oper ? ' · cargado por ' + esc(r.f.oper) : ''}${r.f.ts ? ' el ' + esc(r.f.ts) : ''}</p></div>
       <div class="seg">${ll && amap ? `<button class="btn sm" id="btnVerMapa">Ver en el mapa</button>` : ''}<button class="btn primary sm" onclick="document.getElementById('modal').hidden=true">Cerrar</button></div></div>
+    ${r._rep && RECS.get(r._rep) ? `<div class="ia" style="margin-top:10px"><b class="lab">Hecho repetido</b>Es el mismo hecho que el <button class="nlink" onclick="verDenuncia('${esc(r._rep)}')">N° ${RECS.get(r._rep).n}</button>, que es el que se cuenta en el análisis.</div>` : ''}
     ${r.f.estado === 'Consultar' ? `<div class="ia" style="border-color:var(--signal);background:var(--signal-soft);margin-top:10px"><b class="lab" style="color:var(--signal)">Consulta de ${esc(r.f.oper || 'la operadora')}</b>${esc(r.f.obs || '')}</div>` : ''}
     <div class="den" style="margin-top:12px">
       <div><table>
@@ -1927,7 +1961,7 @@ function pintarMapa2(geo, A, N, R, capa){
   else geo.forEach(x => L.circleMarker(x.ll, { radius:4.5, weight:0.8, color:'#fff', fillColor:COLOR[val(x.r,'delito')] || '#888', fillOpacity:.85 })
       .bindPopup(() => popupHTML(x.r)).addTo(aLayers));
   dibujarCapas(null);
-  if (N && !OCULTOS.has('NARCOMENUDEO')) A.geo.filter(x => val(x.r,'delito') === 'NARCOMENUDEO').forEach(x => L.circle(x.ll, { radius:R, color:COLOR.NARCOMENUDEO, weight:1, fillOpacity:.06, dashArray:'4 4', interactive:false }).addTo(aLayers));
+  if (N && !OCULTOS.has('NARCOMENUDEO')) dibujarZonasNarco(A.geo.filter(x => val(x.r,'delito') === 'NARCOMENUDEO'), R);
   A.cruces.filter(c => c.robo && c.hall && latlon(c.robo) && latlon(c.hall)).forEach(c => L.polyline([latlon(c.robo), latlon(c.hall)], { color:COLOR.AUTOMOTOR, weight:2, dashArray:'6 5', opacity:.8 }).bindTooltip(`${c.dom}: ${c.resultado}`).addTo(aLayers));
   if (aSel) { L.polygon(aSel, { color:'#D1495B', weight:2, fillOpacity:.08 }).addTo(aLayers); }
   setTimeout(() => amap.invalidateSize(), 50);
@@ -1941,6 +1975,28 @@ function dibujarCapas(cerca){
     .bindPopup(`<div class="pop"><b>${esc(d.tipo || 'Desarmadero')}</b><br>${esc(d.dir)} · ${esc(d.localidad)}<br>Habilitado: ${esc(d.hab || '—')}${d.obs ? '<br><i>' + esc(String(d.obs).slice(0, 160)) + '</i>' : ''}</div>`).addTo(aLayers));
   if (CAPAS.procedimientos && (!OCULTOS.has('CAPA_ALL') || cerca)) CAPAS.procedimientos.rows.filter(p => p.allan && usable(p) && enMisPartidos(p.partido) && ok(p.ll)).forEach(p => L.marker(p.ll, { icon: L.divIcon({ className:'', html:'<div style="width:12px;height:12px;background:#fff;border:2.5px solid #2A9D6F;transform:rotate(45deg)"></div>', iconSize:[12,12], iconAnchor:[6,6] }) })
     .bindPopup(`<div class="pop"><b>Allanamiento · ${fmtF(p.fecha)}</b><br>PU ${esc(p.pu)} · ${esc(p.localidad)}${p.geoOk ? '<br><span style="color:#B8620F">Ubicado por la dirección del extracto</span>' : ''}<br><i>${esc(p.ex.slice(0, 220))}…</i></div>`).addTo(aLayers));
+}
+
+/* puntos de venta: si sus radios se tocan, forman una sola zona (sin círculos encimados) */
+function zonasNarco(pts, R){
+  const par = pts.map((_, i) => i), find = i => { while (par[i] !== i) i = par[i] = par[par[i]]; return i; };
+  for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) if (km(pts[i].ll[0], pts[i].ll[1], pts[j].ll[0], pts[j].ll[1]) * 1000 < 2 * R) par[find(j)] = find(i);
+  const g = {}; pts.forEach((p, i) => (g[find(i)] ||= []).push(p));
+  return Object.values(g).map(m => { const lugares = [];
+    m.forEach(x => { if (!lugares.some(l => km(l[0], l[1], x.ll[0], x.ll[1]) < 0.05)) lugares.push(x.ll); });
+    return { m, n: lugares.length, ll: [m.reduce((s, x) => s + x.ll[0], 0) / m.length, m.reduce((s, x) => s + x.ll[1], 0) / m.length] }; });
+}
+const COLOR_ZONA = n => n >= 4 ? '#B5172E' : n >= 2 ? '#E07A1F' : COLOR.NARCOMENUDEO;
+function dibujarZonasNarco(pts, R){
+  const panel = (nombre, op) => { if (!amap.getPane || !amap.createPane) return undefined; let p = amap.getPane(nombre); if (!p) { p = amap.createPane(nombre); p.style.zIndex = 390; p.style.pointerEvents = 'none'; } p.style.opacity = op; return nombre; };
+  const pz = panel('zonasNarco', 0.22);
+  for (const z of zonasNarco(pts, R)) {
+    if (z.n < 2) { z.m.forEach(x => L.circle(x.ll, { radius:R, color:COLOR.NARCOMENUDEO, weight:1, fillOpacity:.06, dashArray:'4 4', interactive:false }).addTo(aLayers)); continue; }
+    // zona: todos los círculos en un mismo panel con opacidad de grupo, así se ven como una sola mancha pareja
+    z.m.forEach(x => L.circle(x.ll, Object.assign({ radius:R, stroke:false, fillColor:COLOR_ZONA(z.n), fillOpacity: pz ? 1 : .12, interactive:false }, pz ? { pane: pz } : {})).addTo(aLayers));
+    L.marker(z.ll, { icon: L.divIcon({ className:'', html:`<div style="transform:translate(-50%,-50%);display:inline-block;white-space:nowrap;background:${COLOR_ZONA(z.n)};color:#fff;font:700 11px Arial;padding:2px 7px;border-radius:10px;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)">Zona de venta · ${z.n} puntos</div>`, iconSize:[0,0] }) })
+      .bindPopup(`<b>Zona de venta con ${z.n} puntos seguidos</b><br>${z.m.length} denuncias de venta. Sus radios de ${R} m se tocan: funcionan como un mismo territorio.<br><span style="color:#666">${[...new Set(z.m.map(x => x.r.localidad))].join(' · ')}</span>`).addTo(aLayers);
+  }
 }
 function pintarFoco(A, N, R, bar){
   const pin = (ll, n, color) => L.marker(ll, { icon: L.divIcon({ className:'', html:`<div class="numpin" style="background:${color}">${n}</div>`, iconSize:[22,22], iconAnchor:[11,11] }) });
@@ -1972,6 +2028,15 @@ function pintarFoco(A, N, R, bar){
     const ll = z.b.rings.flat(); amap.fitBounds(L.latLngBounds(ll).pad(0.4), { maxZoom:17 });
     const f = {}; z.dentro.concat(z.borde).forEach(x => { const k = val(x.r,'delito'); f[k] = (f[k] || 0) + 1; });
     bar.innerHTML = `<span>Barrio <b>${esc(z.b.nombre)}</b>: ${z.dentro.length} hechos dentro (borde negro) y ${z.borde.length} a menos de 300 m — ${Object.entries(f).sort((a,b)=>b[1]-a[1]).map(([k,n]) => `${n} ${k.toLowerCase()}`).join(', ')}${z.fugas ? ` · ${z.fugas} con fuga hacia el barrio` : ''}.</span><button class="btn sm primary" data-act="focoOff">Ver todo el mapa</button>`;
+  } else if (FOCO.des != null && LAST_C.des) {
+    const z = LAST_C.des[FOCO.des]; if (!z) { FOCO = null; return renderAnalisis(); }
+    L.circle(z.d.ll, { radius:1000, color:'#3A3A3A', weight:2, fillOpacity:.05, dashArray:'6 6', interactive:false }).addTo(aLayers);
+    z.cerca.forEach(x => { const m = val(x.r,'modal'), c = m === 'Hallazgo' ? '#2C7A4B' : m === 'Levantamiento' ? '#B8620F' : m === 'Asalto' ? '#D1495B' : '#888';
+      L.circleMarker(x.ll, { radius:8, weight: ['Desarmado','Sin partes'].includes(val(x.r,'estadoh')) ? 3 : 1.5, color: ['Desarmado','Sin partes'].includes(val(x.r,'estadoh')) ? '#000' : '#fff', fillColor:c, fillOpacity:.95 }).bindPopup(() => popupHTML(x.r)).addTo(aLayers); });
+    L.marker(z.d.ll, { icon: L.divIcon({ className:'', html:'<div style="width:18px;height:18px;background:#3A3A3A;border:3px solid #fff;border-radius:3px;box-shadow:0 1px 4px rgba(0,0,0,.5)"></div>', iconSize:[18,18], iconAnchor:[9,9] }) })
+      .bindPopup(`<b>${esc(z.d.tipo)}</b><br>${esc(z.d.dir)} · ${esc(z.d.localidad)}<br>Habilitado: ${esc(z.d.hab || '—')}${z.d.obs ? '<br>' + esc(z.d.obs) : ''}`).addTo(aLayers);
+    amap.fitBounds(L.latLng(z.d.ll).toBounds(2600), { maxZoom:16, paddingTopLeft:[20, 150] });
+    bar.innerHTML = `<span><b>${esc(z.d.tipo)}</b> en ${esc(z.d.dir)} · ${esc(z.d.localidad)} (cuadrado negro) y los hechos de automotor a menos de 1 km: <b style="color:#2C7A4B">${z.hall} hallazgo${z.hall !== 1 ? 's' : ''}</b>${z.hallDes ? ` (${z.hallDes} desarmado${z.hallDes !== 1 ? 's' : ''}, con borde negro)` : ''}, <b style="color:#B8620F">${z.lev} levantamiento${z.lev !== 1 ? 's' : ''}</b> y <b style="color:#D1495B">${z.asal} asalto${z.asal !== 1 ? 's' : ''}</b>.</span><button class="btn sm primary" data-act="focoOff">Ver todo el mapa</button>`;
   } else { FOCO = null; return renderAnalisis(); }
   bar.hidden = false;
 }
@@ -1983,7 +2048,7 @@ function irTab(t){
 
 /* ===================== eventos ===================== */
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-f],[data-act],.item,[data-tab],[data-serie],[data-sest],[data-radio],[data-goto],[data-cruce],[data-paq],[data-consulta],[data-com],[data-informe],[data-foconarco],[data-lg],[data-informepunto],[data-focobarrio]'); if (!t) return;
+  const t = e.target.closest('[data-f],[data-act],.item,[data-tab],[data-serie],[data-sest],[data-radio],[data-goto],[data-cruce],[data-paq],[data-consulta],[data-com],[data-informe],[data-foconarco],[data-lg],[data-informepunto],[data-focobarrio],[data-focodes]'); if (!t) return;
   if (t.dataset.com) { const sel = $('#aCom'); if (sel) { sel.value = t.dataset.com === 'Sin comisaría' ? '' : t.dataset.com; renderAnalisis(); } return; }
   if (t.dataset.paq) return descargarPaquete(+t.dataset.paq);
   if (t.dataset.informe) return informe(t.dataset.informe);
@@ -1995,11 +2060,12 @@ document.addEventListener('click', e => {
   if (t.dataset.radio) { $('#aRadio').value = t.dataset.radio; return renderAnalisis(); }
   if (t.dataset.serie) { FOCO = { serie: t.dataset.serie }; return reAnalisis(); }
   if (t.dataset.foconarco != null && t.dataset.foconarco !== undefined) { FOCO = { narco: +t.dataset.foconarco }; return reAnalisis(); }
+  if (t.dataset.focodes != null) { FOCO = { des: +t.dataset.focodes }; return reAnalisis(); }
   if (t.dataset.focobarrio != null) { FOCO = { barrio: +t.dataset.focobarrio }; return reAnalisis(); }
   if (t.dataset.lg) { const d = t.dataset.lg;
     if (d === '__todos') DELITOS.forEach(x => OCULTOS.delete(x)); else if (d === '__solo') DELITOS.forEach(x => OCULTOS.add(x)); else OCULTOS.has(d) ? OCULTOS.delete(d) : OCULTOS.add(d);
     lsSet(MODO + '_rd_ocultos', [...OCULTOS]); FOCO = null; return reAnalisis(); }
-  if (t.dataset.goto && amap) { const [a, o] = t.dataset.goto.split(',').map(Number); amap.setView([a, o], 16); return; }
+  if (t.dataset.goto && amap) { const [a, o] = t.dataset.goto.split(',').map(Number); amap.setView([a, o], 16); if (aLayers) { L.circle([a, o], { radius:90, color:'#D1495B', weight:3, fill:false, dashArray:'4 4' }).addTo(aLayers); L.circleMarker([a, o], { radius:6, color:'#fff', weight:2, fillColor:'#D1495B', fillOpacity:1 }).addTo(aLayers); } return; }
   if (t.dataset.cruce && amap) { const A = analizar(baseAnalisis({ pend:true })); const c = A.cruces.find(x => x.dom === t.dataset.cruce); const pts = [c?.robo && latlon(c.robo), c?.hall && latlon(c.hall)].filter(Boolean); if (pts.length) amap.fitBounds(L.latLngBounds(pts).pad(0.5), { maxZoom:16 }); return; }
   const r = RECS.get(CUR);
   if (t.dataset.f && r) {
@@ -2012,6 +2078,7 @@ document.addEventListener('click', e => {
   }
   const a = t.dataset.act; if (!a) return;
   if (a === 'focoOff') { FOCO = null; pintarMapa._fit = false; return reAnalisis(); }
+  if (a === 'norep') { t.dataset.v.split('|').forEach(id => { const x = RECS.get(id); if (x) { x.f.nodup = true; persistir(x); } }); toast('Listo: se cuentan como hechos distintos.'); return reAnalisis(); }
   if (a === 'climaAct') { toast('Descargando el clima…'); return asegurarClima(baseAnalisis({ pend:true }), true).then(() => { reAnalisis(); toast(climaError || 'Clima actualizado.'); }); }
   if (a === 'save') return guardarYSeguir('Completo');
   if (a === 'consultar') return guardarYSeguir('Consultar');
