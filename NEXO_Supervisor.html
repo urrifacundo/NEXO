@@ -1005,7 +1005,7 @@ function renderForm(){
   const necesitaF = r.fchk !== 'OK';
   const domsRel = v.veh ? dominiosEn(r.relato).filter(x => x !== normDom(val(r,'dom'))) : [];
   const ds = sug(r,'delito');
-  $('#form').innerHTML = `<div class="fbody">
+  $('#form').innerHTML = `<div class="fbody">${mismoHechoHTML(r)}
     <div class="frow"><label>Delito <em>*</em></label><div>${chips(r, 'delito', DELITOS, true)}${!r.f.delito && ds ? `<div class="def">Sugerido por ${esc(ds.why)}.</div>` : !ds && !r.f.delito ? '<div class="def" style="color:var(--signal)">Sin sugerencia: leé el relato y elegí, o Descartar.</div>' : ''}</div></div>
     ${d ? `<div class="frow"><label>Modalidad <em>*</em></label><div>${chips(r, 'modal', mods.map(x => x[0]))}${def ? `<div class="def">${esc(def)}</div>` : ''}</div></div>` : ''}
     <div class="frow"><label>Fecha / hora</label><div><div class="two">
@@ -1131,6 +1131,34 @@ function baseAnalisis(opt){
 /* el mismo hecho cargado dos veces en el sistema: misma IPP y mismo delito, o mismo día, misma hora (±30 min), mismo lugar (≤150 m) y mismo delito.
    Se cuenta una sola vez: queda el registro completo o el que tiene relato. */
 let REPETIDOS = [];
+function mismoLugarYHora(a, b){
+  const la = latlon(a), lb = latlon(b); if (!la || !lb) return false;
+  const mins = h => h ? parseInt(h) * 60 + parseInt(h.slice(3, 5)) : null;
+  const d = km(+la[0], +la[1], +lb[0], +lb[1]), ma = mins(horaFinal(a)), mb = mins(horaFinal(b));
+  if (ma != null && mb != null ? (Math.abs(ma - mb) > 30 || d > 0.15) : d > 0.05) return false;
+  const da = normDom(val(a,'dom')), db = normDom(val(b,'dom')); if (da.length >= 6 && db.length >= 6 && da !== db) return false;
+  const msa = val(a,'modal'), msb = val(b,'modal'); if (msa && msb && msa !== msb) return false;
+  return true;
+}
+// para la operadora: otros hechos de su paquete que parecen el mismo que este
+function posiblesMismo(r){
+  if (r.f.nodup || r.f.estado === 'Descartar') return [];
+  const ip = String(r.ipp || '').replace(/\s/g, '').toUpperCase(), f = fechaFinal(r), d = val(r,'delito'), P = normP(r.partido), out = [];
+  for (const x of mios()) {
+    if (x.id === r.id || x.f.estado === 'Descartar' || val(x,'delito') !== d) continue;
+    const xi = String(x.ipp || '').replace(/\s/g, '').toUpperCase();
+    if (ip.length >= 6 && ip === xi) { out.push([x, 'misma IPP']); continue; }
+    if (!x.f.nodup && f && fechaFinal(x) === f && normP(x.partido) === P && mismoLugarYHora(r, x)) out.push([x, 'mismo día, hora y lugar']);
+  }
+  return out;
+}
+function mismoHechoHTML(r){
+  const ps = posiblesMismo(r); if (!ps.length) return '';
+  return `<div class="ia" style="border-color:var(--signal);background:var(--signal-soft);margin-bottom:10px"><b class="lab" style="color:var(--signal)">Posible hecho repetido</b>
+    ${ps.map(([x, por]) => `Parece el mismo hecho que el <button type="button" class="nlink" data-act="irA" data-v="${esc(x.id)}">N° ${x.n}</button> (${por}${x.f.estado === 'Completo' ? ', ya cargado' : ''}${!x.relato ? ', sin relato' : ''}).`).join('<br>')}
+    <div class="seg" style="margin-top:6px"><button type="button" class="chip" data-act="esdup" data-v="${esc(ps[0][0].id)}">Es el mismo: descartar este</button><button type="button" class="chip" data-act="nodup">Son hechos distintos</button></div>
+    <div class="hint" style="margin-top:4px">Si es el mismo, conviene quedarse con el que tiene la denuncia completa.</div></div>`;
+}
 function marcarRepetidos(recs){
   const par = new Map(recs.map(r => [r.id, r.id])), find = id => { while (par.get(id) !== id) id = par.get(id); return id; };
   const unir = (a, b) => { const x = find(a.id), y = find(b.id); if (x !== y) par.set(y, x); };
@@ -1138,14 +1166,7 @@ function marcarRepetidos(recs){
   Object.values(porIpp).forEach(g => g.slice(1).forEach(x => unir(g[0], x)));
   const porDia = {}; recs.forEach(r => { const f = fechaFinal(r); if (f && !r.f.nodup) (porDia[normP(r.partido) + f + val(r,'delito')] ||= []).push(r); });
   const mins = h => h ? parseInt(h) * 60 + parseInt(h.slice(3, 5)) : null;
-  for (const g of Object.values(porDia)) for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length; j++) {
-    const a = g[i], b = g[j], la = latlon(a), lb = latlon(b); if (!la || !lb) continue;
-    const d = km(+la[0], +la[1], +lb[0], +lb[1]), ma = mins(horaFinal(a)), mb = mins(horaFinal(b));
-    if (ma != null && mb != null ? (Math.abs(ma - mb) > 30 || d > 0.15) : d > 0.05) continue;
-    const da = normDom(val(a,'dom')), db = normDom(val(b,'dom')); if (da.length >= 6 && db.length >= 6 && da !== db) continue;
-    const msa = val(a,'modal'), msb = val(b,'modal'); if (msa && msb && msa !== msb) continue;
-    unir(a, b);
-  }
+  for (const g of Object.values(porDia)) for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length; j++) if (mismoLugarYHora(g[i], g[j])) unir(g[i], g[j]);
   const grupos = {}; recs.forEach(r => (grupos[find(r.id)] ||= []).push(r));
   const calidad = r => (r.f.estado === 'Completo' ? 1e7 : 0) + (r.f.estado === 'Descartar' ? -1e8 : 0) + String(r.relato || '').length * 10 - (r.n || 0) / 1e6;
   REPETIDOS = [];
@@ -1271,19 +1292,19 @@ function entornoNarco(geo, R){
 let amap = null, aLayers = null, aSel = null, FOCO = null, LAST_N = null, LAST_A = null, LAST_C = {};
 let OCULTOS = new Set(lsGet(MODO + '_rd_ocultos', ['CAPA_DES','CAPA_ALL']));
 function renderAnalisis(){
-  const pend = $('#aPend')?.value ?? '1', R = +($('#aRadio')?.value ?? 300), capa = $('#aCapa')?.value ?? 'puntos', fd = $('#aDel')?.value ?? '', ff = $('#aFr')?.value ?? '', fp = $('#aPar')?.value ?? '';
+  const pend = $('#aPend')?.value ?? '1', R = +($('#aRadio')?.value ?? 300), capa = $('#aCapa')?.value ?? 'puntos', fd = $('#aDel')?.value ?? '', ff = $('#aFr')?.value ?? '', fp = $('#aPar')?.value ?? '', fa = $('#aApr')?.value ?? '';
   const todosP = baseAnalisis({ pend: pend === '1' }), partidosAll = [...new Set(todosP.map(r => normP(r.partido)))].sort();
   const enP = todosP.filter(r => !fp || normP(r.partido) === fp);
   const comisAll = [...new Set(enP.map(r => val(r,'comisaria')).filter(Boolean))].sort();
   let fc = $('#aCom')?.value ?? ''; if (fc && !comisAll.includes(fc)) fc = '';
   let base = enP.filter(r => !fc || val(r,'comisaria') === fc);
   const A = analizar(base);
-  let geo = A.geo.filter(x => (!fd || val(x.r,'delito') === fd) && (!ff || franjaDe(x.r) === ff));
+  let geo = A.geo.filter(x => (!fd || val(x.r,'delito') === fd) && (!ff || franjaDe(x.r) === ff) && (!fa || (fa === 'con' ? conAprh(x.r) : cuentaAprh(x.r) && !conAprh(x.r))));
   const N = entornoNarco(A.geo, R / 1000); LAST_N = N; LAST_A = A; LAST_C = analisisCapas(A, N, R);
   const cnt = {}; geo.forEach(x => { const d = val(x.r,'delito'); cnt[d] = (cnt[d]||0)+1; });
   const conCruce = A.cruces.filter(c => c.robo && c.hall);
   const PAT = patronesRecurrentes(base); LAST_P = PAT.lista;
-  const ir = ['Alertas','Avance','Consultas','Circuito','Barrios','Series','Patrones','Comisaría','Narco','Vehículos','Repetidos','Contexto'];
+  const ir = ['Alertas','Avance','Consultas','Circuito','Barrios','Series','Patrones','Movimiento','Aprehendidos','Comisaría','Narco','Vehículos','Repetidos','Contexto'];
   $('#aside').innerHTML = `<div class="afijo">
       <div class="afil afil3">
         <select id="aPar" aria-label="Partido"><option value="">Todos los partidos</option>${partidosAll.map(p => `<option value="${esc(p)}"${p===fp?' selected':''}>${esc(p)}</option>`).join('')}</select>
@@ -1291,9 +1312,10 @@ function renderAnalisis(){
         <select id="aPend" aria-label="Registros"><option value="1"${pend==='1'?' selected':''}>Completos + pendientes</option><option value="0"${pend==='0'?' selected':''}>Solo completos</option></select>
         <select id="aDel" aria-label="Delito en el mapa"><option value="">Mapa: todos los delitos</option>${DELITOS.map(d => `<option value="${d}"${d===fd?' selected':''}>Mapa: ${d}</option>`).join('')}</select>
         <select id="aFr" aria-label="Franja en el mapa"><option value="">Mapa: todas las franjas</option>${FRANJAS.map(f => `<option value="${f}"${f===ff?' selected':''}>Mapa: ${f}</option>`).join('')}</select>
+        <select id="aApr" aria-label="Aprehendidos en el mapa"><option value="">Mapa: con y sin aprehendidos</option><option value="con"${fa==='con'?' selected':''}>Mapa: con aprehendidos</option><option value="sin"${fa==='sin'?' selected':''}>Mapa: sin aprehendidos</option></select>
         <select id="aCapa" aria-label="Capa"><option value="puntos"${capa==='puntos'?' selected':''}>Puntos por delito</option><option value="calor"${capa==='calor'?' selected':''}>Mapa de calor</option></select>
       </div>
-      <div class="afbar"><span class="hint"><b>${base.length}</b> hechos${fp || fc ? ' · ' + esc([fp, fc.replace(/^CRIA\./,'')].filter(Boolean).join(' · ')) : ''}${fp || fc || fd || ff ? ' · <button class="nlink" data-act="filtrosOff">quitar filtros</button>' : ''}</span>
+      <div class="afbar"><span class="hint"><b>${base.length}</b> hechos${fp || fc ? ' · ' + esc([fp, fc.replace(/^CRIA\./,'')].filter(Boolean).join(' · ')) : ''}${fp || fc || fd || ff || fa ? ' · <button class="nlink" data-act="filtrosOff">quitar filtros</button>' : ''}</span>
         <span class="seg"><button class="btn primary sm" data-informe="pdf">Informe PDF</button><button class="btn sm" data-informe="word">Word</button></span></div>
       <div class="irbar" id="irBar"></div>
     </div>` + (MODO === 'supervisor' ? avanceHTML() : '') + `
@@ -1305,7 +1327,7 @@ function renderAnalisis(){
       ${CAPAS.desarmaderos ? `<button class="lgbtn${OCULTOS.has('CAPA_DES') ? ' off' : ''}" data-lg="CAPA_DES"><i style="background:#3A3A3A;border-radius:2px"></i>Desarmaderos / autopartes</button>` : ''}
       ${CAPAS.procedimientos ? `<button class="lgbtn${OCULTOS.has('CAPA_ALL') ? ' off' : ''}" data-lg="CAPA_ALL"><i style="background:#fff;border:2px solid #2A9D6F;border-radius:2px;transform:rotate(45deg)"></i>Allanamientos por drogas</button>` : ''}
       ${CAPAS.barrios ? `<button class="lgbtn${OCULTOS.has('CAPA_BAR') ? ' off' : ''}" data-lg="CAPA_BAR"><i style="background:rgba(142,92,194,.35);border:1px solid #8E5CC2;border-radius:2px"></i>Barrios populares</button>` : ''}</div>` : ''}
-    <p class="hint">Tocá un delito para mostrarlo u ocultarlo en el mapa. Alrededor de cada punto de venta hay un círculo verde; cuando los círculos se tocan forman una sola <b style="color:#E07A1F">zona de venta</b> (naranja, 2 o 3 puntos; <b style="color:#B5172E">roja</b>, 4 o más), con un número que indica cuántos puntos tiene. De lejos solo se numeran las rojas; al acercarte aparecen todas.</p>
+    <p class="hint">Tocá un delito para mostrarlo u ocultarlo en el mapa. Borde negro: hecho con aprehendidos o demorados. Alrededor de cada punto de venta hay un círculo verde; cuando los círculos se tocan forman una sola <b style="color:#E07A1F">zona de venta</b> (naranja, 2 o 3 puntos; <b style="color:#B5172E">roja</b>, 4 o más), con un número que indica cuántos puntos tiene. De lejos solo se numeran las rojas; al acercarte aparecen todas.</p>
     <p class="hint">${pend==='1' ? 'Los pendientes se cuentan con los valores sugeridos.' : ''} ${base.length - A.geo.length} hechos sin ubicación no aparecen en el mapa.</p>
 
     <h3>Posibles series (bandas) · ${A.series.length}</h3>
@@ -1317,6 +1339,8 @@ function renderAnalisis(){
       : '<p class="hint">Todavía no hay grupos de 3 o más hechos parecidos. Aparecen a medida que se cargan semanas y se completan autores, movilidad, arma e ingreso.</p>'}
 
     ${patronesHTML(PAT)}
+    ${movimientoHTML(movimientoDelito(base))}
+    ${aprehendidosHTML(base)}
     <h3>Por comisaría</h3>
     ${porComisariaHTML(base, A)}
 
@@ -1340,18 +1364,18 @@ function renderAnalisis(){
     ${MODO === 'supervisor' ? contextoHTML(analisisContexto(base)) : ''}
   `;
   { const hs = [...$('#aside').querySelectorAll('h3')], usados = new Set();
-    $('#irBar').innerHTML = '<span class="hint">Ir a:</span>' + ir.map(k => { const h = hs.find(x => !usados.has(x) && x.textContent.toLowerCase().includes(k.toLowerCase().replace('narco','venta de droga').replace('comisaría','por comisar'))); if (!h) return ''; usados.add(h); return `<button class="chip sm" data-ir="${hs.indexOf(h)}">${k}</button>`; }).join(''); }
+    $('#irBar').innerHTML = '<span class="hint">Ir a:</span>' + ir.map(k => { const h = hs.find(x => !usados.has(x) && x.textContent.toLowerCase().includes(k.toLowerCase().replace('narco','venta de droga').replace('comisaría','por comisar').replace('movimiento','se mueve').replace('aprehendidos','aprehendidos o'))); if (!h) return ''; usados.add(h); return `<button class="chip sm" data-ir="${hs.indexOf(h)}">${k}</button>`; }).join(''); }
   pintarMapa(geo, A, N, R, capa);
   if (MODO === 'supervisor') asegurarClima(base).then(ch => { if (ch) reAnalisis(); });
 }
 function porComisariaHTML(base, A){
   const g = {};
-  for (const r of base) { const c = val(r,'comisaria') || 'Sin comisaría'; const x = (g[c] ||= { n:0, robo:0, auto:0, narco:0, mod:{}, series:0 }); x.n++;
+  for (const r of base) { const c = val(r,'comisaria') || 'Sin comisaría'; const x = (g[c] ||= { n:0, robo:0, auto:0, narco:0, mod:{}, series:0, ha:0, ap:0 }); x.n++; if (cuentaAprh(r)) { x.ha++; if (conAprh(r)) x.ap++; }
     const d = val(r,'delito'); if (d === 'ROBO') x.robo++; if (d === 'AUTOMOTOR') x.auto++; if (d === 'NARCOMENUDEO') x.narco++; const m = val(r,'modal'); if (m) x.mod[m] = (x.mod[m] || 0) + 1; }
   A.series.forEach(s => new Set(s.items.map(r => val(r,'comisaria') || 'Sin comisaría')).forEach(c => g[c] && g[c].series++));
   const filas = Object.entries(g).sort((a,b) => b[1].n - a[1].n);
   if (!filas.length) return '<p class="hint">Sin datos.</p>';
-  return `<div style="max-height:320px;overflow:auto"><table class="t"><tr><th>Comisaría</th><th>Hechos</th><th>Robos</th><th>Autom.</th><th>Narco</th><th>Series</th><th>Más frecuente</th></tr>${filas.map(([c,x]) => `<tr class="cl" data-com="${esc(c)}"><td>${esc(c.replace(/^CRIA\./,''))}</td><td>${x.n}</td><td>${x.robo}</td><td>${x.auto}</td><td>${x.narco}</td><td>${x.series || ''}</td><td>${esc(Object.entries(x.mod).sort((a,b)=>b[1]-a[1])[0]?.[0] || '')}</td></tr>`).join('')}</table></div>
+  return `<div style="max-height:320px;overflow:auto"><table class="t"><tr><th>Comisaría</th><th>Hechos</th><th>Robos</th><th>Autom.</th><th>Narco</th><th>Series</th><th>Con aprehendidos</th><th>Más frecuente</th></tr>${filas.map(([c,x]) => `<tr class="cl" data-com="${esc(c)}"><td>${esc(c.replace(/^CRIA\./,''))}</td><td>${x.n}</td><td>${x.robo}</td><td>${x.auto}</td><td>${x.narco}</td><td>${x.series || ''}</td><td>${x.ap ? `${x.ap} (${Math.round(100 * x.ap / x.ha)}%)` : '—'}</td><td>${esc(Object.entries(x.mod).sort((a,b)=>b[1]-a[1])[0]?.[0] || '')}</td></tr>`).join('')}</table></div>
     <p class="hint">Clic en una comisaría para ver solo esa comisaría. En los pendientes se usa la comisaría sugerida.</p>`;
 }
 function victimasHTML(rs){
@@ -1398,6 +1422,8 @@ function informe(tipo){
     ${esc(x.zona)} · del ${fmtF(x.desde)} al ${fmtF(x.hasta)}<br>En común: ${esc(x.rasgos || '—')}<br>Comisarías: ${esc([...new Set(x.items.map(r => val(r,'comisaria')).filter(Boolean))].join(' · ') || '—')}<br>
     Hechos: ${x.items.map(r => `N° ${r.n} (IPP ${esc(r.ipp)})`).join(', ')}</div>`).join('') : '<p>Sin series con los datos actuales.</p>'}
   ${(() => { const PI = patronesRecurrentes(base); return PI.lista.length ? sinBotones(patronesHTML(PI)).replace(/<h3([^>]*)>/g, '<h2>').replace(/<\/h3>/g, '</h2>').replace(/<p class="hint">Tocá un patrón[^<]*<\/p>/, '') : ''; })()}
+  ${sinBotones(movimientoHTML(movimientoDelito(base))).replace(/<h3([^>]*)>/g, '<h2>').replace(/<\/h3>/g, '</h2>').replace(/<p class="hint">Tocá una fila[^<]*<\/p>/, '')}
+  ${sinBotones(aprehendidosHTML(base)).replace(/<h3([^>]*)>/g, '<h2>').replace(/<\/h3>/g, '</h2>')}
   <h2>Por comisaría</h2>${limpiar(porComisariaHTML(base, A)).replace('max-height:320px;overflow:auto', '')}
   <h2>A quién le roban</h2>${victimasHTML(base)}
   <h2>Entorno de puntos de venta de droga (radio ${R} m)</h2>
@@ -1960,10 +1986,94 @@ function patronesHTML(P){
   return `<h3>Patrones que se repiten · ${L0.length}</h3>
     <p class="hint" style="margin:0 0 6px">Mismo lugar (4 cuadras), misma modalidad y mismo horario o día; o un perfil de autores o víctimas que en esa zona aparece mucho más que en el resto. Sirve para decidir dónde y cuándo poner presencia.</p>${aviso}
     ${L0.length ? L0.map(c => `<div class="serie" data-patron="${c.i}"><b>${esc(patronTitulo(c))}</b><span class="flag ${c.tipo === 'perfil' ? 'info' : 'warn'}" style="margin-left:6px">${c.tipo === 'dia' ? 'DÍA Y HORA' : c.tipo === 'hora' ? 'HORARIO' : 'PERFIL'}</span>
-      <p>${patronTexto(c)}</p>${c.comun.length ? `<p>En común: ${esc(c.comun.join(', '))}.</p>` : ''}<p>${esc(c.com)}</p>
+      <p>${patronTexto(c)} ${(() => { const a = c.items.filter(q => conAprh(q.r)).length; return `<b>${a ? a + ' con aprehendidos' : 'Ningún aprehendido'}</b>.`; })()}</p>${c.comun.length ? `<p>En común: ${esc(c.comun.join(', '))}.</p>` : ''}<p>${esc(c.com)}</p>
       <p>N° ${c.items.map(q => `<button class="nlink" onclick="event.stopPropagation();verDenuncia('${esc(q.r.id)}')">${q.r.n}</button>`).join(' ')}</p></div>`).join('')
       : '<p class="hint">Sin patrones claros con los datos actuales. Aparecen a medida que se acumulan semanas y se completan horarios y autores.</p>'}
     ${L0.length ? '<p class="hint">Tocá un patrón para verlo en el mapa. Es una regularidad estadística, no prueba que sea la misma banda.</p>' : ''}`;
+}
+
+/* =====================================================================
+   APREHENDIDOS Y MOVIMIENTO DEL DELITO
+   ===================================================================== */
+const conAprh = r => val(r,'aprh') === 'Sí';
+// hechos donde tiene sentido contar aprehendidos (no denuncias de venta ni vehículos hallados)
+const cuentaAprh = r => !['NARCOMENUDEO'].includes(val(r,'delito')) && !['Hallazgo','Desarmadero'].includes(val(r,'modal'));
+const edadesDe = r => (String(val(r,'aedad') || '').match(/\d{1,2}/g) || []).map(Number).filter(n => n >= 10 && n <= 90);
+function aprehendidosHTML(base){
+  const H = base.filter(cuentaAprh), con = H.filter(conAprh);
+  if (H.length < 10) return '';
+  const pct = (a, b) => b ? Math.round(100 * a / b) + '%' : '—';
+  const g = {}; H.forEach(r => { const k = val(r,'delito') + (val(r,'modal') ? ' · ' + val(r,'modal') : ''); const x = (g[k] ||= { n:0, c:0 }); x.n++; if (conAprh(r)) x.c++; });
+  const filas = Object.entries(g).filter(([, x]) => x.n >= 5).sort((a, b) => b[1].n - a[1].n).slice(0, 12);
+  const ed = con.flatMap(edadesDe), menores = ed.filter(e => e < 18).length;
+  const tramos = [['Menores (hasta 17)', e => e < 18], ['18 a 25', e => e >= 18 && e <= 25], ['26 a 35', e => e >= 26 && e <= 35], ['36 o más', e => e >= 36]];
+  const hm = con.filter(r => edadesDe(r).some(e => e < 18) || val(r,'amenor') === 'Sí').length;
+  return `<h3>Aprehendidos o demorados en el momento</h3>
+    <div class="hallazgo-txt">En <strong>${con.length}</strong> de ${H.length} hechos (<strong>${pct(con.length, H.length)}</strong>) hubo aprehendidos o demorados en el momento.${hm ? ` En ${hm} de ellos había menores.` : ''}</div>
+    <table class="t" style="margin-top:6px"><tr><th>Delito</th><th>Hechos</th><th>Con aprehendidos</th><th>%</th></tr>${filas.map(([k, x]) => `<tr><td>${esc(k)}</td><td>${x.n}</td><td>${x.c || ''}</td><td>${x.c ? pct(x.c, x.n) : '—'}</td></tr>`).join('')}</table>
+    ${ed.length ? `<p class="hint" style="margin:8px 0 3px"><b>Edad de los aprehendidos</b> (${ed.length} con edad cargada)</p><table class="t"><tr>${tramos.map(t => `<th>${t[0]}</th>`).join('')}</tr><tr>${tramos.map(t => { const n = ed.filter(t[1]).length; return `<td>${n} (${pct(n, ed.length)})</td>`; }).join('')}</tr></table>` : ''}
+    <p class="hint">Es el dato del acta inicial: cuenta quién fue aprehendido o demorado en el momento, no el esclarecimiento posterior. No se cuentan denuncias de venta ni vehículos hallados. En el mapa, borde negro = hecho con aprehendidos.</p>`;
+}
+
+/* ---------- movimiento: zonas que se encienden, repetición cercana, escalada de armas ---------- */
+function movimientoDelito(base){
+  const pts = base.filter(r => latlon(r) && fechaFinal(r) && val(r,'delito') !== 'NARCOMENUDEO' && val(r,'modal') !== 'Hallazgo' && (r.fchk === 'OK' || r.fchk === 'SIN HORA' || r.f.fecha1))
+    .map(r => { const ll = latlon(r); return { r, ll: [+ll[0], +ll[1]], f: fechaFinal(r) }; });
+  if (pts.length < 30) return null;
+  const cargas = base.map(r => r.fcarga).filter(Boolean).sort(), fs = pts.map(p => p.f).sort(), d1 = fs.at(-1), d0 = [fs[Math.floor(fs.length * 0.02)], cargas[0] || ''].sort().at(-1), nDias = diasEntre(d1, d0) + 1;
+  const out = { d1, nDias };
+  // 1) zonas que se encienden / se apagan: última semana contra el promedio semanal anterior (celdas de ~400 m)
+  if (nDias >= 14) {
+    const ini = sumaDias(d1, -6), semAnt = Math.max(1, (diasEntre(ini, d0)) / 7), C = 0.004, cel = ll => Math.floor(ll[0] / C) + ':' + Math.floor(ll[1] / C);
+    const cuenta = {}; pts.filter(p => p.f >= d0).forEach(p => { const k = cel(p.ll), x = (cuenta[k] ||= { u:0, a:0, items:[] }); if (p.f >= ini) { x.u++; x.items.push(p); } else x.a++; });
+    const vecino = k => { const [a, o] = k.split(':').map(Number); let u = 0, an = 0, items = []; for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const x = cuenta[(a + i) + ':' + (o + j)]; if (x) { u += x.u; an += x.a; items = items.concat(x.items); } } return { u, a: an / semAnt, items }; };
+    const zonas = Object.keys(cuenta).map(k => ({ k, ...vecino(k) })).filter(z => z.u >= 4 && z.u >= 2.5 * Math.max(z.a, 0.8)).sort((a, b) => (b.u - b.a) - (a.u - a.a));
+    const elegidas = []; for (const z of zonas) { if (elegidas.some(e => z.items.filter(p => e.items.includes(p)).length >= z.items.length * 0.5)) continue; elegidas.push(z); if (elegidas.length >= 8) break; }
+    out.enc = elegidas.map(z => { const top = arr => { const o = {}; arr.forEach(x => { if (x) o[x] = (o[x] || 0) + 1; }); return Object.entries(o).sort((a, b) => b[1] - a[1]); };
+      return { u: z.u, a: z.a, ll: [z.items.reduce((s, p) => s + p.ll[0], 0) / z.items.length, z.items.reduce((s, p) => s + p.ll[1], 0) / z.items.length], loc: top(z.items.map(p => p.r.localidad))[0]?.[0] || '', calle: top(z.items.map(p => p.r.calle))[0]?.[0] || '', mods: top(z.items.map(p => val(p.r,'modal') || val(p.r,'delito'))).slice(0, 2).map(x => `${x[1]} ${x[0].toLowerCase()}`).join(', ') }; });
+    out.ini = ini;
+  }
+  // 2) repetición cercana: después de un robo a vivienda, riesgo de otro a menos de 200 m en 14 días
+  const viv = pts.filter(p => val(p.r,'delito') === 'ROBO' && VIVIENDA.includes(val(p.r,'modal'))).sort((a, b) => a.f.localeCompare(b.f));
+  if (viv.length >= 5) {
+    const sig = p => viv.filter(q => q !== p && q.f >= p.f && diasEntre(q.f, p.f) <= 14 && km(p.ll[0], p.ll[1], q.ll[0], q.ll[1]) <= 0.2);
+    const evaluables = viv.filter(p => diasEntre(d1, p.f) >= 14 || sig(p).length);
+    const rep = evaluables.filter(p => sig(p).length).length;
+    // lo esperable por azar: cuántos robos a vivienda caen en un círculo de 200 m en 14 días, según la superficie urbana ocupada
+    const celdas = new Set(pts.map(p => Math.floor(p.ll[0] / 0.00225) + ':' + Math.floor(p.ll[1] / 0.0027))).size, area = celdas * 0.0625;
+    const tasaDia = viv.length / Math.max(1, nDias), lambda = tasaDia * 14 * (Math.PI * 0.04) / Math.max(area, 1), esper = 1 - Math.exp(-lambda);
+    const activos = viv.filter(p => sumaDias(p.f, 14) >= todayISO()).map(p => ({ p, rep: sig(p), hasta: sumaDias(p.f, 14) })).sort((a, b) => b.rep.length - a.rep.length || b.p.f.localeCompare(a.p.f));
+    out.rc = { n: evaluables.length, rep, esper, activos };
+  }
+  // 3) escalada de armas: robos con arma de fuego por comisaría, últimos 14 días contra el período anterior
+  if (nDias >= 21) {
+    const corte = sumaDias(d1, -13), g = {};
+    base.filter(r => val(r,'delito') === 'ROBO' && fechaFinal(r) && fechaFinal(r) >= d0).forEach(r => { const c = val(r,'comisaria') || 'Sin comisaría', x = (g[c] ||= { an:0, af:0, un:0, uf:0 }); const ar = val(r,'arma'); if (!ar || ar === 'S/D') return;
+      if (fechaFinal(r) >= corte) { x.un++; if (ar === 'Fuego') x.uf++; } else { x.an++; if (ar === 'Fuego') x.af++; } });
+    out.esc = Object.entries(g).filter(([, x]) => x.un >= 8 && x.an >= 8 && x.uf / x.un - x.af / x.an >= 0.15 && x.uf / x.un >= 1.5 * (x.af / x.an || 0.05))
+      .map(([c, x]) => ({ c, ...x })).sort((a, b) => (b.uf / b.un - b.af / b.an) - (a.uf / a.un - a.af / a.an)).slice(0, 8);
+    out.corte = corte;
+  }
+  return out;
+}
+function movimientoHTML(M){
+  let h = `<h3>Cómo se mueve el delito</h3>`;
+  if (!M) return h + '<p class="hint">Hacen falta más hechos con fecha y ubicación.</p>';
+  const pct = v => Math.round(v * 100) + '%';
+  h += `<p class="hint" style="margin:0 0 4px"><b>Zonas que se encendieron</b> en la última semana (${M.ini ? `${fmtF(M.ini)} al ${fmtF(M.d1)}` : '—'}), contra su promedio de las semanas anteriores.</p>`;
+  h += M.enc ? (M.enc.length ? `<table class="t"><tr><th>Zona</th><th>Última semana</th><th>Antes (por semana)</th><th>Qué pasa</th></tr>${M.enc.map(z => `<tr class="cl" data-goto="${z.ll[0]},${z.ll[1]}"><td>${esc(z.calle)}<br><span class="hint">${esc(z.loc)}</span></td><td><b>${z.u}</b></td><td>${z.a.toFixed(1)}</td><td>${esc(z.mods)}</td></tr>`).join('')}</table>` : '<p class="hint">Ninguna zona se disparó esta semana.</p>')
+    : `<p class="hint">Se activa con 2 semanas de datos (hay ${M.nDias} días).</p>`;
+  if (M.rc) {
+    const r = M.rc, tasa = r.n ? r.rep / r.n : 0;
+    h += `<p class="hint" style="margin:10px 0 4px"><b>Repetición cercana (robos a viviendas)</b>: después de una entradera, escruche o asalto en vivienda, ¿hay otro a menos de 2 cuadras en los 14 días siguientes?</p>
+      ${r.n < 5 ? `<p class="hint">Todavía hay pocos casos con 14 días de seguimiento (${r.n}): el porcentaje se calcula con más semanas.</p>` : `<div class="hallazgo-txt">Pasó en <strong>${r.rep}</strong> de ${r.n} casos (<strong>${pct(tasa)}</strong>)${r.esper > 0 ? `; por azar se esperaría alrededor del ${Math.max(1, Math.round(r.esper * 100))}%${tasa > 2 * r.esper && r.rep >= 2 ? `: <strong>${(tasa / r.esper).toFixed(0)} veces más</strong>. Conviene reforzar la cuadra los días siguientes` : ''}` : ''}.</div>`}
+      ${!r.activos.length ? `<p class="hint">No hay viviendas robadas con la ventana de riesgo vigente hoy (los datos llegan hasta el ${fmtF(M.d1)}).</p>` : ''}
+      ${r.activos.length ? `<p class="hint" style="margin:6px 0 3px">Viviendas robadas con ventana de riesgo vigente (hasta la fecha indicada):</p><table class="t"><tr><th>Lugar</th><th>Fecha</th><th>Riesgo hasta</th><th>Ya se repitió</th></tr>${r.activos.slice(0, 12).map(a => `<tr class="cl" data-goto="${a.p.ll[0]},${a.p.ll[1]}"><td>${esc(a.p.r.calle)} ${esc(a.p.r.altura)}<br><span class="hint">${esc(a.p.r.localidad)} · ${esc(val(a.p.r,'modal'))}</span></td><td>${fmtF(a.p.f)}</td><td>${fmtF(a.hasta)}</td><td>${a.rep.length ? `<b style="color:var(--bad)">Sí, ${a.rep.length}</b>` : ''}</td></tr>`).join('')}</table>` : ''}`;
+  }
+  h += `<p class="hint" style="margin:10px 0 4px"><b>Escalada de armas</b>: comisarías donde los robos con arma de fuego subieron en los últimos 14 días.</p>`;
+  h += M.esc ? (M.esc.length ? `<table class="t"><tr><th>Comisaría</th><th>Antes</th><th>Últimos 14 días</th></tr>${M.esc.map(e => `<tr class="cl" data-com="${esc(e.c)}"><td>${esc(e.c.replace(/^CRIA\./, ''))}</td><td>${pct(e.af / e.an)} (${e.af} de ${e.an})</td><td><b style="color:var(--bad)">${pct(e.uf / e.un)}</b> (${e.uf} de ${e.un})</td></tr>`).join('')}</table>` : '<p class="hint">Sin subas marcadas.</p>')
+    : `<p class="hint">Se activa con 3 semanas de datos (hay ${M.nDias} días).</p>`;
+  return h + '<p class="hint">Tocá una fila para ir al lugar o a la comisaría.</p>';
 }
 
 function alertasHTML(N, R){
@@ -2028,7 +2138,7 @@ function avanceHTML(){
 }
 function popupHTML(r){
   const com = val(r,'comisaria').replace(/^CRIA\./,'');
-  return `<div class="pop"><b>N° ${r.n} · ${esc(val(r,'delito'))}</b> · ${esc(val(r,'modal'))}<br>${fmtF(fechaFinal(r))} ${esc(horaFinal(r)||'')} · ${esc(r.localidad)}<br>${esc(r.calle)} ${esc(r.altura)}${com ? '<br>' + esc(com) : ''}${r.ia?.resumen ? `<br><i>${esc(r.ia.resumen.slice(0,110))}${r.ia.resumen.length > 110 ? '…' : ''}</i>` : ''}<br><button onclick="verDenuncia('${esc(r.id)}')">Ver denuncia</button></div>`;
+  return `<div class="pop"><b>N° ${r.n} · ${esc(val(r,'delito'))}</b> · ${esc(val(r,'modal'))}<br>${fmtF(fechaFinal(r))} ${esc(horaFinal(r)||'')} · ${esc(r.localidad)}<br>${esc(r.calle)} ${esc(r.altura)}${com ? '<br>' + esc(com) : ''}${conAprh(r) ? `<br><b>Con aprehendidos${val(r,'aedad') ? ' (' + esc(val(r,'aedad')) + ' años)' : ''}</b>` : ''}${r.ia?.resumen ? `<br><i>${esc(r.ia.resumen.slice(0,110))}${r.ia.resumen.length > 110 ? '…' : ''}</i>` : ''}<br><button onclick="verDenuncia('${esc(r.id)}')">Ver denuncia</button></div>`;
 }
 function verDenuncia(id){
   const r = RECS.get(id); if (!r) return;
@@ -2100,7 +2210,7 @@ function pintarMapa2(geo, A, N, R, capa){
   bar.hidden = true;
   geo = geo.filter(x => !OCULTOS.has(val(x.r,'delito')));
   if (capa === 'calor' && L.heatLayer) L.heatLayer(geo.map(x => [x.ll[0], x.ll[1], 0.6]), { radius:18, blur:22, maxZoom:15 }).addTo(aLayers);
-  else geo.forEach(x => L.circleMarker(x.ll, { radius:4.5, weight:0.8, color:'#fff', fillColor:COLOR[val(x.r,'delito')] || '#888', fillOpacity:.85 })
+  else geo.forEach(x => L.circleMarker(x.ll, conAprh(x.r) ? { radius:5.5, weight:2.2, color:'#111', fillColor:COLOR[val(x.r,'delito')] || '#888', fillOpacity:.95 } : { radius:4.5, weight:0.8, color:'#fff', fillColor:COLOR[val(x.r,'delito')] || '#888', fillOpacity:.85 })
       .bindPopup(() => popupHTML(x.r)).addTo(aLayers));
   dibujarCapas(null);
   if (N && !OCULTOS.has('NARCOMENUDEO')) dibujarZonasNarco(A.geo.filter(x => val(x.r,'delito') === 'NARCOMENUDEO'), R);
@@ -2236,7 +2346,7 @@ document.addEventListener('click', e => {
     if (k === 'delito' || k === 'modal') renderList(); return;
   }
   const a = t.dataset.act; if (!a) return;
-  if (a === 'filtrosOff') { ['aPar','aCom','aDel','aFr'].forEach(id => { if ($('#' + id)) $('#' + id).value = ''; }); FOCO = null; return renderAnalisis(); }
+  if (a === 'filtrosOff') { ['aPar','aCom','aDel','aFr','aApr'].forEach(id => { if ($('#' + id)) $('#' + id).value = ''; }); FOCO = null; return renderAnalisis(); }
   if (a === 'focoOff') { FOCO = null; pintarMapa._fit = false; return reAnalisis(); }
   if (a === 'norep') { t.dataset.v.split('|').forEach(id => { const x = RECS.get(id); if (x) { x.f.nodup = true; persistir(x); } }); toast('Listo: se cuentan como hechos distintos.'); return reAnalisis(); }
   if (a === 'climaAct') { toast('Descargando el clima…'); return asegurarClima(baseAnalisis({ pend:true }), true).then(() => { reAnalisis(); toast(climaError || 'Clima actualizado.'); }); }
@@ -2250,6 +2360,7 @@ document.addEventListener('click', e => {
   if (a === 'coordSD') { r.f.coord = r.f.coord === 'Sin dato' ? '' : 'Sin dato'; persistir(r); renderForm(); renderList(); }
   if (a === 'geo') geocodificar();
   if (a === 'dom') { r.f.dom = t.dataset.v; persistir(r); renderForm(); }
+  if (a === 'irA') { const l = filtrados(); if (!l.some(x => x.id === t.dataset.v) && $('#fEstado')) { $('#fEstado').value = 'all'; } return seleccionar(t.dataset.v); }
   if (a === 'nodup') { r.f.nodup = true; persistir(r); renderForm(); }
   if (a === 'esdup') { const o = RECS.get(t.dataset.v); r.f.obs = ((r.f.obs || '') + ` Duplicado de N° ${o ? o.n : '?'}.`).trim(); r.f.dup = t.dataset.v; return guardarYSeguir('Descartar'); }
 });
@@ -2266,7 +2377,7 @@ document.addEventListener('change', e => {
   if (e.target.id === 'i_comis_otra') { const r = RECS.get(CUR), v = e.target.value.trim().toUpperCase(); if (!r || !v) return;
     const extra = lsGet(MODO + '_rd_comis_extra', {}); (extra[r.partido] ||= []).includes(v) || extra[r.partido].push(v); lsSet(MODO + '_rd_comis_extra', extra); _comis = null;
     r.f.comisaria = v; persistir(r); const sc = $('.fbody').scrollTop; renderForm(); $('.fbody').scrollTop = sc; toast('Comisaría agregada a la lista de ' + r.partido + '.'); return; }
-  if (['aPend','aCapa','aDel','aFr','aCom','aPar'].includes(e.target.id)) { if (e.target.id === 'aPar' && $('#aCom')) $('#aCom').value = ''; FOCO = null; return renderAnalisis(); }
+  if (['aPend','aCapa','aDel','aFr','aCom','aPar','aApr'].includes(e.target.id)) { if (e.target.id === 'aPar' && $('#aCom')) $('#aCom').value = ''; FOCO = null; return renderAnalisis(); }
   if (e.target.id === 'i_pegar') { const p = parsearCoord(e.target.value); if (!p) return toast('No reconozco esas coordenadas. Formato: -34.64274, -58.57752'); setCoord(+p[0].toFixed(6), +p[1].toFixed(6), false); if (map) map.setView(p, 17); }
   if (e.target.dataset?.in === 'fecha1' || e.target.dataset?.in === 'hora1') { const r = RECS.get(CUR); if (r) { const sc = $('.fbody').scrollTop; renderForm(); $('.fbody').scrollTop = sc; } }
 });
