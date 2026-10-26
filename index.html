@@ -665,6 +665,19 @@ function dbAll(){ return new Promise(res => { if(!idb) return res([]); try{ cons
 const limpio = r => { const { _t, _s, ...x } = r; return x; };
 function dbDel(ids){ return new Promise(res => { if(!idb || !ids.length) return res(false); try{ const tx = idb.transaction('rec','readwrite'); const st = tx.objectStore('rec'); ids.forEach(id => st.delete(id)); tx.oncomplete = () => res(true); tx.onerror = () => res(false); } catch(e){ res(false); } }); }
 const ippN = s => String(s || '').replace(/\s/g, '').toUpperCase();
+/* hechos que llegaron por un avance sin relato y que en esta PC ya están (con relato) desde el crudo, con otro identificador: se unen por IPP */
+async function unirHuerfanos(){
+  const conRel = {}; for (const r of RECS.values()) if (r.relato) { const k = ippN(r.ipp); if (k.length >= 6) (conRel[k] ||= []).push(r); }
+  const borrar = [], cambiados = [], trabajado = x => (x.f.estado || 'Pendiente') !== 'Pendiente';
+  for (const h of [...RECS.values()]) {
+    if (h.relato) continue; const c = conRel[ippN(h.ipp)]; if (!c) continue;
+    const dest = c.length === 1 ? c[0] : c.find(q => val(q,'delito') === val(h,'delito')); if (!dest || dest === h) continue;
+    if (trabajado(h) && (!trabajado(dest) || String(h.f.ts || '') >= String(dest.f.ts || ''))) dest.f = Object.assign({}, h.f);
+    RECS.delete(h.id); borrar.push(h.id); cambiados.push(dest);
+  }
+  if (borrar.length) { await dbDel(borrar); await dbPut(cambiados); _comis = null; }
+  return borrar.length;
+}
 function dbPut(list){ return new Promise(res => { if(!idb) return res(false); try{ const tx = idb.transaction('rec','readwrite'); const st = tx.objectStore('rec'); list.forEach(r=>st.put(limpio(r))); tx.oncomplete=()=>res(true); tx.onerror=()=>res(false);}catch(e){res(false);} }); }
 
 /* ===================== estado ===================== */
@@ -758,7 +771,7 @@ async function cargarCrudo(file){
   for (const r of lote) if (r.alertCoord && r.f.coord === 'OK' && r.f.estado === 'Pendiente') r.f.coord = '';
   let maxN = Math.max(0, ...[...RECS.values()].map(r => r.n || 0));
   lote.sort((a,b) => (a.partido+a.fcarga).localeCompare(b.partido+b.fcarga)).forEach(r => { if (!r.n) r.n = ++maxN; });
-  await dbPut(lote);
+  await dbPut(lote); if (MODO === 'supervisor') await unirHuerfanos();
   OP = op; lsSet(MODO + '_rd_op', OP);
   const otros = Object.entries(porPartido).filter(([p]) => !ps.has(p)).sort((a,b)=>b[1]-a[1]);
   const alertas = lote.filter(r => r.chk !== 'OK' || r.alertCoord).length;
@@ -841,7 +854,7 @@ async function importarAvance(files){
     if (!rows.length || !('ID delito' in rows[0]) || !('DELITO' in rows[0])) return msgImport(`“${file.name}” no es un Excel de avance de NEXO. Si es un paquete o un crudo, cargalo arriba, en el paso 2.`, true);
     for (const x of rows){
       const id = String(x['ID delito']).trim(); let r = RECS.get(id);
-      if (!r && x.IPP) r = [...RECS.values()].find(q => q.relato && ippN(q.ipp) === ippN(x.IPP) && (!x.DELITO || val(q,'delito') === x.DELITO || q.cal0?.cat === x.DELITO));
+      if (!r && x.IPP) { const c = [...RECS.values()].filter(q => q.relato && ippN(q.ipp) === ippN(x.IPP)); r = c.length === 1 ? c[0] : c.find(q => !x.DELITO || val(q,'delito') === x.DELITO || q.cal0?.cat === x.DELITO); }
       if (!r) { const lat = num(x.LAT), lon = num(x.LON), P = normP(x.Partido);
         r = { id, ipp: x.IPP || '', fecha: toISODate(x['Fecha hecho']), hora: toHHMM(x['Hora hecho']), fcarga: toISODate(x['Fecha carga']), partido: P, localidad: x.Localidad || '', calle: x.Calle || '',
           altura: x.Altura ?? '', entre: x['Esquina / entre'] || '', dep: x.Dependencia || '', cal: x['Carátula original'] || '', relato: '', lat0: lat, lon0: lon,
@@ -859,7 +872,7 @@ async function importarAvance(files){
       ok++; lote.push(r);
     }
   }
-  await dbPut(lote); _comis = null;
+  await dbPut(lote); _comis = null; await unirHuerfanos();
   const tot = { Completo:0, Consultar:0, Descartar:0, Pendiente:0 }, quien = {};
   for (const r of lote) { const e = r.f.estado || 'Pendiente'; tot[e] = (tot[e] || 0) + 1; if (e !== 'Pendiente' && r.f.oper) quien[r.f.oper] = (quien[r.f.oper] || 0) + 1; }
   const filas = `<div><b>${tot.Completo}</b> completos · <b>${tot.Consultar}</b> consultas · <b>${tot.Descartar}</b> descartados · <b>${tot.Pendiente}</b> pendientes</div>` +
@@ -2133,6 +2146,8 @@ function avanceHTML(){
   return `<h3>Avance de las operadoras</h3>
     <table class="t"><tr><th>Asignación</th><th>Hechos</th><th>Hechos listos</th><th>Consultas</th><th>Faltan</th><th>Min por hecho</th></tr>${filas}</table>
     <p class="hint">Se actualiza al importar el Excel de avance de cada una (botón “Cargar Excel o avances”).</p>
+    ${(() => { const sin = mios().filter(r => !r.relato); if (!sin.length) return ''; const fs = sin.map(r => r.fcarga).filter(Boolean).sort();
+      return `<div class="flag warn" style="white-space:normal;font-size:12.5px;margin-top:4px">${sin.length} hechos de los avances no tienen la denuncia porque no están en ningún crudo cargado en esta computadora${fs.length ? ` (cargados en el sistema entre el ${fmtF(fs[0])} y el ${fmtF(fs.at(-1))})` : ''}. Cargá el crudo de esas fechas y se completan solos.</div>`; })()}
     <h3>Consultas de las operadoras · ${cons.length}</h3>
     ${cons.length ? `<table class="t">${cons.slice(0, 30).map(r => `<tr class="cl" data-consulta="${esc(r.id)}"><td>N° ${r.n}<br><span class="hint">${esc(r.f.oper || '')}</span></td><td>${esc(r.f.obs || '')}</td></tr>`).join('')}</table>` : '<p class="hint">Sin consultas.</p>'}`;
 }
@@ -2171,7 +2186,7 @@ function verDenuncia(id){
       <p class="hint">En azul: valores sugeridos que la operadora todavía no confirmó.</p>
       ${cruceDominio(r)}</div>
       <div>${r.ia?.resumen ? `<div class="ia"><b class="lab">Lectura de IA</b>${esc(r.ia.resumen)}</div>` : ''}
-      ${r.relato ? `<div class="relato" style="font-size:13.5px">${resaltar(r.relato)}</div>` : '<p class="hint">El relato no viene en el Excel de avance. Cargá el Excel crudo de esa semana en NEXO Supervisor para verlo acá.</p>'}</div>
+      ${r.relato ? `<div class="relato" style="font-size:13.5px">${resaltar(r.relato)}</div>` : `<div class="ia" style="border-color:var(--signal);background:var(--signal-soft)"><b class="lab" style="color:var(--signal)">Falta la denuncia</b>Este hecho (IPP ${esc(r.ipp)}) llegó en el avance de ${esc(r.f.oper || 'la operadora')}, pero no está en ningún Excel crudo cargado en esta computadora.${r.fcarga ? ` Fue cargado en el sistema el <b>${fmtF(r.fcarga)}</b>: cargá el crudo que incluya esa fecha` : ' Cargá el crudo de esa semana'} y la denuncia aparece sola, sin perder lo cargado.</div>`}</div>
     </div>`;
   $('#modal').hidden = false; $('#modalBody').scrollTop = 0;
   const bm = $('#btnVerMapa'); if (bm) bm.onclick = () => { $('#modal').hidden = true; amap.setView(ll, 17); };
@@ -2463,6 +2478,7 @@ window.addEventListener('beforeunload', () => { guardarTiempo(); const r = RECS.
   document.body.classList.add(MODO === 'operadora' ? 'op' : 'sup');
   await openDB();
   (await dbAll()).forEach(r => { if (!r.cal0) r.cal0 = { cat:null, mod:'', why:'', veh:[] }; RECS.set(r.id, r); });
+  if (MODO === 'supervisor') await unirHuerfanos();
   if (MODO === 'supervisor') { const sucios = []; for (const r of RECS.values()) { try { if (limpiarSugeridos(r)) sucios.push(r); } catch(e){} } if (sucios.length) await dbPut(sucios); }
   (await capasDbGet()).forEach(c => { CAPAS[c.id] = c; }); renderCapasSetup();
   if (!window.XLSX) msgSetup('No se pudo cargar el lector de Excel desde internet. Revisá la conexión y recargá (F5).', true);
