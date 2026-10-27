@@ -862,7 +862,7 @@ function complementarios(){
   return out;
 }
 async function descargarComplementario(label){
-  const p = complementarios().find(x => x.label === label); if (!p) return toast('No hay hechos nuevos para ese paquete.');
+  const p = complementarios().find(x => x.label === label); if (!p) { refrescarPaquetes(); return toast('Esos hechos ya van en un paquete que descargaste: mandá ese.'); }
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(p.recs.map(filaDeRec)), 'Hechos'); XLSX.utils.book_append_sheet(wb, hojaConfig(), 'NEXO_CONFIG');
   XLSX.writeFile(wb, `Paquete_${norm(label).replace(/[^a-z0-9]+/g,'_')}_complementario_${todayISO()}.xlsx`);
   p.recs.forEach(r => r.paq = label); await dbPut(p.recs);
@@ -893,7 +893,7 @@ async function descargarPaquete(i, j){
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Hechos'); XLSX.utils.book_append_sheet(wb, hojaConfig(), 'NEXO_CONFIG');
   XLSX.writeFile(wb, `Paquete_${norm(p.label).replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')}_${todayISO()}.xlsx`);
   const marcados = []; rows.forEach(x => { const r = RECS.get(idFila(x)); if (r && r.paq !== p.label) { r.paq = p.label; marcados.push(r); } }); if (marcados.length) await dbPut(marcados);
-  toast(`Paquete ${p.label} descargado: ${rows.length} hechos.`);
+  toast(`Paquete ${p.label} descargado: ${rows.length} hechos.`); refrescarPaquetes();
 }
 function msgImport(m, bad){ $('#importSummary').innerHTML = `<div class="flag ${bad?'bad':'ok'}" style="white-space:normal;font-size:13px">${esc(m)}</div>`; }
 function msgSetup(m, bad){ $('#loadSummary').innerHTML = `<div class="flag ${bad?'bad':'ok'}" style="white-space:normal;font-size:13px">${esc(m)}</div>`; }
@@ -1119,7 +1119,7 @@ function renderForm(){
   const domsRel = v.veh ? dominiosEn(r.relato).filter(x => x !== normDom(val(r,'dom'))) : [];
   const ds = sug(r,'delito');
   $('#form').innerHTML = `<div class="fbody">${mismoHechoHTML(r)}
-    <div class="frow"><label>Delito <em>*</em></label><div>${chips(r, 'delito', DELITOS, true)}${!r.f.delito && ds ? `<div class="def">Sugerido por ${esc(ds.why)}.</div>` : !ds && !r.f.delito ? '<div class="def" style="color:var(--signal)">Sin sugerencia: leé el relato y elegí, o Descartar.</div>' : ''}</div></div>
+    <div class="frow"><label>Delito <em>*</em></label><div>${chips(r, 'delito', DELITOS.filter(x => catDe(x, '') !== 'fuera' || val(r,'delito') === x), true)}${DELITOS.some(x => catDe(x, '') === 'fuera') ? `<div class="hint">No se cargan: ${DELITOS.filter(x => catDe(x, '') === 'fuera').map(x => x.toLowerCase()).join(', ')}. Si el hecho es de esos, tocá “Descartar”.</div>` : ''}${!r.f.delito && ds ? `<div class="def">Sugerido por ${esc(ds.why)}.</div>` : !ds && !r.f.delito ? '<div class="def" style="color:var(--signal)">Sin sugerencia: leé el relato y elegí, o Descartar.</div>' : ''}</div></div>
     ${d ? `<div class="frow"><label>Modalidad <em>*</em></label><div>${chips(r, 'modal', mods.map(x => x[0]))}${def ? `<div class="def">${esc(def)}</div>` : ''}</div></div>` : ''}
     <div class="frow"><label>Fecha / hora</label><div><div class="two">
       <input type="date" class="txt${!r.f.fecha1 && necesitaF && sf ? ' sug' : ''}" data-in="fecha1" id="i_fecha1" value="${esc(r.f.fecha1 || (necesitaF && !r.fecha && sf ? sf.v : '') || r.fecha || '')}">
