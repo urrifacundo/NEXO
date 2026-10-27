@@ -144,7 +144,9 @@ textarea.txt{min-height:44px;resize:vertical}
 .aside{border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding:12px 14px 40px}
 .aside h3{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:16px 0 6px}
 .aside h3:first-child{margin-top:0}
-.aside h3{scroll-margin-top:250px}
+.aside h3{scroll-margin-top:90px}
+.afbtns{display:flex;gap:5px;flex-wrap:wrap}.afbtns .btn.on{background:var(--accent-soft, #E3ECF5);border-color:var(--accent, #1D4A73)}
+.afpanel{margin-top:7px}.afpanel.cerrado{display:none !important}
 .afil select{width:100%;min-width:0;text-overflow:ellipsis}
 .afijo{position:sticky;top:-12px;z-index:5;background:var(--panel);margin:-12px -14px 10px;padding:10px 14px 8px;border-bottom:1px solid var(--line);box-shadow:0 4px 8px -6px rgba(0,0,0,.18)}
 .afil3{grid-template-columns:1fr 1fr 1fr}
@@ -1412,6 +1414,7 @@ function entornoNarco(geo, R){
   const top = puntos.map(p => { const c = otros.filter(x => km(p.ll[0], p.ll[1], x.ll[0], x.ll[1]) <= R); const f = {}; c.forEach(x => { const k = val(x.r,'modal') || val(x.r,'delito').toLowerCase(); f[k] = (f[k]||0)+1; }); return { p, n: c.length, top: Object.entries(f).sort((a,b)=>b[1]-a[1]).slice(0,2).map(e => `${e[0]} (${e[1]})`).join(', ') }; }).sort((a,b) => b.n - a.n);
   return { puntos: puntos.length, otros: otros.length, dentro: dentro.length, shareArea, shareHechos, ratio: shareArea ? shareHechos / shareArea : null, porMod, top, grupos, violencia };
 }
+let PANEL = '';
 let amap = null, aLayers = null, aSel = null, FOCO = null, LAST_N = null, LAST_A = null, LAST_C = {};
 let OCULTOS = new Set(lsGet(MODO + '_rd_ocultos', ['CAPA_DES','CAPA_ALL']));
 function renderAnalisis(){
@@ -1428,8 +1431,10 @@ function renderAnalisis(){
   const conCruce = A.cruces.filter(c => c.robo && c.hall);
   const PAT = patronesRecurrentes(base); LAST_P = PAT.lista;
   const ir = ['Alertas','Avance','Salud','Consultas','Circuito','Barrios','Series','Patrones','Movimiento','Aprehendidos','Comisaría','Narco','Vehículos','Repetidos','Lesiones','Contexto'];
+  const nFil = [fp, fc, fd, ff, fa, pend === '0' ? 1 : '', capa !== 'puntos' ? 1 : ''].filter(Boolean).length;
   $('#aside').innerHTML = `<div class="afijo">
-      <div class="afil afil3">
+      <div class="afbtns"><button class="btn sm${PANEL === 'filtros' ? ' on' : ''}" data-act="pFiltros">Filtros${nFil ? ` (${nFil})` : ''} ${PANEL === 'filtros' ? '▴' : '▾'}</button><button class="btn sm${PANEL === 'ir' ? ' on' : ''}" data-act="pIr">Ir a ${PANEL === 'ir' ? '▴' : '▾'}</button><button class="btn sm" data-act="cfgAnal">Qué se analiza</button><button class="btn primary sm" data-informe="pdf">PDF</button><button class="btn sm" data-informe="word">Word</button></div>
+      <div class="afil afil3 afpanel${PANEL === 'filtros' ? '' : ' cerrado'}" id="pFiltros">
         <select id="aPar" aria-label="Partido"><option value="">Todos los partidos</option>${partidosAll.map(p => `<option value="${esc(p)}"${p===fp?' selected':''}>${esc(p)}</option>`).join('')}</select>
         <select id="aCom" aria-label="Comisaría"><option value="">Todas las comisarías</option>${comisAll.map(c => `<option${c===fc?' selected':''}>${esc(c)}</option>`).join('')}</select>
         <select id="aPend" aria-label="Registros"><option value="1"${pend==='1'?' selected':''}>Completos + pendientes</option><option value="0"${pend==='0'?' selected':''}>Solo completos</option></select>
@@ -1438,9 +1443,8 @@ function renderAnalisis(){
         <select id="aApr" aria-label="Aprehendidos en el mapa"><option value="">Mapa: con y sin aprehendidos</option><option value="con"${fa==='con'?' selected':''}>Mapa: con aprehendidos</option><option value="sin"${fa==='sin'?' selected':''}>Mapa: sin aprehendidos</option></select>
         <select id="aCapa" aria-label="Capa"><option value="puntos"${capa==='puntos'?' selected':''}>Puntos por delito</option><option value="calor"${capa==='calor'?' selected':''}>Mapa de calor</option></select>
       </div>
-      <div class="afbar"><span class="hint"><b>${base.filter(esAnal).length}</b> hechos analizados${base.some(r => !esAnal(r)) ? ` · ${base.filter(r => !esAnal(r)).length} de contexto` : ''}${fp || fc ? ' · ' + esc([fp, fc.replace(/^CRIA\./,'')].filter(Boolean).join(' · ')) : ''}${fp || fc || fd || ff || fa ? ' · <button class="nlink" data-act="filtrosOff">quitar filtros</button>' : ''}</span>
-        <span class="seg"><button class="btn sm" data-act="cfgAnal">Qué se analiza</button><button class="btn primary sm" data-informe="pdf">Informe PDF</button><button class="btn sm" data-informe="word">Word</button></span></div>
-      <div class="irbar" id="irBar"></div>
+      <div class="afbar"><span class="hint"><b>${base.filter(esAnal).length}</b> hechos analizados${base.some(r => !esAnal(r)) ? ` · ${base.filter(r => !esAnal(r)).length} de contexto` : ''}${fp || fc ? ' · ' + esc([fp, fc.replace(/^CRIA\./,'')].filter(Boolean).join(' · ')) : ''}${fp || fc || fd || ff || fa ? ' · <button class="nlink" data-act="filtrosOff">quitar filtros</button>' : ''}</span></div>
+      <div class="irbar afpanel${PANEL === 'ir' ? '' : ' cerrado'}" id="irBar"></div>
     </div>` + backupHTML() + (MODO === 'supervisor' ? avanceHTML() + saludHTML() : '') + `
     ${alertasHTML(N, R)}${capasHTML(LAST_C, R)}
     <h3>Mapa: qué se muestra</h3>
@@ -2583,7 +2587,7 @@ document.addEventListener('click', e => {
   if (t.dataset.foconarco != null && t.dataset.foconarco !== undefined) { FOCO = { narco: +t.dataset.foconarco }; return reAnalisis(); }
   if (t.dataset.comp) return descargarComplementario(t.dataset.comp);
   if (t.dataset.patron != null) { FOCO = { patron: +t.dataset.patron }; pintarMapa._fit = false; return reAnalisis(); }
-  if (t.dataset.ir != null) { const h = $('#aside').querySelectorAll('h3')[+t.dataset.ir]; if (h) h.scrollIntoView({ behavior:'smooth', block:'start' }); return; }
+  if (t.dataset.ir != null) { const h = $('#aside').querySelectorAll('h3')[+t.dataset.ir]; PANEL = ''; document.querySelectorAll('.afpanel').forEach(p => p.classList.add('cerrado')); document.querySelectorAll('[data-act="pIr"],[data-act="pFiltros"]').forEach(b => { b.classList.remove('on'); b.textContent = b.textContent.replace('▴', '▾'); }); if (h) setTimeout(() => h.scrollIntoView({ behavior:'smooth', block:'start' }), 30); return; }
   if (t.dataset.focodes != null) { FOCO = { des: +t.dataset.focodes }; return reAnalisis(); }
   if (t.dataset.focobarrio != null) { FOCO = { barrio: +t.dataset.focobarrio }; return reAnalisis(); }
   if (t.dataset.lg) { const d = t.dataset.lg;
@@ -2603,6 +2607,7 @@ document.addEventListener('click', e => {
   const a = t.dataset.act; if (!a) return;
   if (a === 'cfgAnal') { $('#modalBody').className = ''; $('#modalBody').innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h2 style="margin:0">Qué se analiza</h2><button class="btn primary sm" onclick="document.getElementById('modal').hidden=true">Listo</button></div>
       <p class="hint">Cambiá un delito y el análisis se actualiza al instante. Para sumar un delito, pasalo a “Analizar”; para sacarlo, a “Fuera”.</p><div id="cfgModal"></div><div id="paqModal"></div>`; renderCfg($('#cfgModal')); refrescarPaquetes(); $('#modal').hidden = false; return; }
+  if (a === 'pFiltros' || a === 'pIr') { PANEL = PANEL === (a === 'pFiltros' ? 'filtros' : 'ir') ? '' : (a === 'pFiltros' ? 'filtros' : 'ir'); return reAnalisis(); }
   if (a === 'cfgArchivo') return descargarConfig();
   if (a === 'backupYa') return exportar();
   if (a === 'focoLes') { FOCO = { les: true }; pintarMapa._fit = false; return reAnalisis(); }
@@ -2727,6 +2732,8 @@ window.addEventListener('beforeunload', () => { guardarTiempo(); const r = RECS.
   if (MODO === 'supervisor' && !lsGet(MODO + '_rd_les_ini', false)) { lsSet(MODO + '_rd_sumar', [...new Set([...lsGet(MODO + '_rd_sumar', []), 'LESIONES'])]); lsSet(MODO + '_rd_les_ini', true); }
   if (MODO === 'supervisor') { const sucios = []; for (const r of RECS.values()) { try { if (limpiarSugeridos(r)) sucios.push(r); } catch(e){} } if (sucios.length) await dbPut(sucios); }
   (await capasDbGet()).forEach(c => { CAPAS[c.id] = c; }); renderCapasSetup(); renderCfg();
+  // los paneles de filtros e "Ir a" se cierran solos al bajar por el análisis
+  { const as = $('#aside'); let y0 = 0; if (as) as.addEventListener('scroll', () => { if (!PANEL) { y0 = as.scrollTop; return; } if (Math.abs(as.scrollTop - y0) > 120) { PANEL = ''; as.querySelectorAll('.afpanel').forEach(p => p.classList.add('cerrado')); as.querySelectorAll('[data-act="pIr"],[data-act="pFiltros"]').forEach(b => { b.classList.remove('on'); b.textContent = b.textContent.replace('▴', '▾'); }); } }); }
   if (!window.XLSX) msgSetup('No se pudo cargar el lector de Excel desde internet. Revisá la conexión y recargá (F5).', true);
   renderSetup();
 })();
