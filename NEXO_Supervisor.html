@@ -945,6 +945,7 @@ function exportar(){
     ['Nota', 'El relato no se exporta (tiene datos personales). En los pendientes, DELITO y demás datos son los sugeridos.']]), 'INFO');
   const nom = norm(OP.nombre).replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'') || 'operador';
   XLSX.writeFile(wb, MODO === 'supervisor' ? `NEXO_consolidado_${todayISO()}.xlsx` : `Avance_${nom}_${todayISO()}.xlsx`);
+  if (MODO === 'supervisor') { lsSet(MODO + '_rd_backup', todayISO()); if ($('#aside')?.innerHTML) setTimeout(reAnalisis, 300); }
   sinceExport = 0; lsSet(MODO + '_rd_since', 0); actualizarBanner(); toast(MODO === 'supervisor' ? 'Excel consolidado exportado.' : 'Avance exportado. Mandáselo al supervisor.');
 }
 async function importarAvance(files){
@@ -978,8 +979,10 @@ async function importarAvance(files){
   const filas = `<div><b>${tot.Completo}</b> completos · <b>${tot.Consultar}</b> consultas · <b>${tot.Descartar}</b> descartados · <b>${tot.Pendiente}</b> pendientes</div>` +
     (Object.keys(quien).length ? `<div class="hint">Trabajados por: ${Object.entries(quien).map(([o, n]) => `${esc(o)} (${n})`).join(', ')}</div>` : '');
   const pend = lote.filter(r => (r.f.estado || 'Pendiente') === 'Pendiente').length;
+  baseAnalisis({ todos:true }); const nRep = REPETIDOS.length;
   $('#importSummary').innerHTML = `<div class="flag ok" style="font-size:13px;white-space:normal">Avance importado: ${ok} hechos actualizados${nuevos ? ` (${nuevos} que no estaban en esta computadora)` : ''}.</div>${filas}
     ${pend === ok ? '<div class="flag warn" style="white-space:normal;font-size:12.5px">Ese Excel no trae ningún hecho trabajado. ¿La operadora lo exportó después de cargar? Pedile que toque “Enviar avance” de nuevo.</div>' : ''}
+    ${nRep ? `<div class="flag warn" style="white-space:normal;font-size:12.5px;margin-top:6px">Hay ${nRep} hecho${nRep > 1 ? "s" : ""} repetido${nRep > 1 ? "s" : ""} en el sistema (el mismo hecho cargado dos veces). Se cuentan una sola vez; los ves en el análisis, en “Ir a: Repetidos”.</div>` : ""}
     <div style="margin-top:8px"><button class="btn primary" id="btnGoImp">Ver análisis</button></div>`;
   $('#btnGoImp').onclick = abrirMesa;
   if (OP) { const st = estadisticas(); $('#resumeBox').hidden = false; $('#resumeTxt').textContent = `${OP.nombre}: ${st.total} hechos en esta computadora (${st.Completo} completos, ${st.Pendiente} pendientes, ${st.Consultar} a consultar).`; }
@@ -1424,7 +1427,7 @@ function renderAnalisis(){
   const cnt = {}; geo.forEach(x => { const d = val(x.r,'delito'); cnt[d] = (cnt[d]||0)+1; });
   const conCruce = A.cruces.filter(c => c.robo && c.hall);
   const PAT = patronesRecurrentes(base); LAST_P = PAT.lista;
-  const ir = ['Alertas','Avance','Consultas','Circuito','Barrios','Series','Patrones','Movimiento','Aprehendidos','Comisaría','Narco','Vehículos','Repetidos','Lesiones','Contexto'];
+  const ir = ['Alertas','Avance','Salud','Consultas','Circuito','Barrios','Series','Patrones','Movimiento','Aprehendidos','Comisaría','Narco','Vehículos','Repetidos','Lesiones','Contexto'];
   $('#aside').innerHTML = `<div class="afijo">
       <div class="afil afil3">
         <select id="aPar" aria-label="Partido"><option value="">Todos los partidos</option>${partidosAll.map(p => `<option value="${esc(p)}"${p===fp?' selected':''}>${esc(p)}</option>`).join('')}</select>
@@ -1438,7 +1441,7 @@ function renderAnalisis(){
       <div class="afbar"><span class="hint"><b>${base.filter(esAnal).length}</b> hechos analizados${base.some(r => !esAnal(r)) ? ` · ${base.filter(r => !esAnal(r)).length} de contexto` : ''}${fp || fc ? ' · ' + esc([fp, fc.replace(/^CRIA\./,'')].filter(Boolean).join(' · ')) : ''}${fp || fc || fd || ff || fa ? ' · <button class="nlink" data-act="filtrosOff">quitar filtros</button>' : ''}</span>
         <span class="seg"><button class="btn sm" data-act="cfgAnal">Qué se analiza</button><button class="btn primary sm" data-informe="pdf">Informe PDF</button><button class="btn sm" data-informe="word">Word</button></span></div>
       <div class="irbar" id="irBar"></div>
-    </div>` + (MODO === 'supervisor' ? avanceHTML() : '') + `
+    </div>` + backupHTML() + (MODO === 'supervisor' ? avanceHTML() + saludHTML() : '') + `
     ${alertasHTML(N, R)}${capasHTML(LAST_C, R)}
     <h3>Mapa: qué se muestra</h3>
     <div class="lgd" style="margin-top:8px">${DELITOS.filter(d => cnt[d] && catDe(d, '') === 'analizar').map(d => `<button class="lgbtn${OCULTOS.has(d) ? ' off' : ''}" data-lg="${d}" title="Mostrar u ocultar en el mapa"><i style="background:${COLOR[d]}"></i>${d} ${cnt[d]}</button>`).join('')}
@@ -1958,10 +1961,17 @@ function contextoTexto(r){
   return p.join(' · ');
 }
 
+/* desde qué fecha los datos están completos: la primera fecha de carga, salvo que el crudo traiga como "fecha de carga" el día en que se bajó (entonces se usan las fechas de los hechos) */
+function inicioDatos(base){
+  const fs = base.map(fechaFinal).filter(Boolean).sort(), cs = base.map(r => r.fcarga).filter(Boolean).sort();
+  let d = fs[Math.floor(fs.length * 0.1)] || '';
+  if (cs.length && cs[0] > d && fs.filter(f => f >= cs[0]).length >= 0.6 * fs.length) d = cs[0];
+  return d;
+}
 /* análisis de contexto */
 function analisisContexto(base){
   // solo desde la primera fecha de carga: los hechos anteriores llegan incompletos (se denuncian tarde)
-  const cargas = base.map(r => r.fcarga).filter(Boolean).sort(), desde = cargas[0] || '';
+  const desde = inicioDatos(base);
   const conHora = base.filter(r => fechaFinal(r) && fechaFinal(r) >= desde && horaFinal(r) && (r.fchk === 'OK' || r.f.fecha1 || r.f.hora1) && esAnal(r));
   const fechas = conHora.map(fechaFinal).sort(); if (!fechas.length) return null;
   const d0 = fechas[0], d1 = fechas.at(-1), nDias = diasEntre(d1, d0) + 1;
@@ -2005,7 +2015,7 @@ function analisisContexto(base){
   return { d0, d1, nDias, hayClima, expo, cuenta, cal, diasTipo, mes, diasMes, semana, nHora: conHora.length };
 }
 function contextoHTML(X){
-  if (!X) return `<h3>Contexto: clima, luz y calendario</h3><p class="hint">Hacen falta hechos con fecha y hora confiables.</p>`;
+  if (!X) return `<h3>Contexto: clima, luz y calendario</h3><p class="hint">Hacen falta robos o hurtos con fecha y hora confiables. ${$('#aPend')?.value === '0' ? 'Estás viendo “Solo completos”: probá con “Completos + pendientes”.' : 'Revisá los filtros de arriba (partido o comisaría).'}</p>`;
   const pct = v => { const n = Math.round(v * 100); return (n > 0 ? '+' : '') + n + '%'; };
   const tasaTabla = (cuenta, expo, cols, titulo, unidad) => {
     const filas = Object.entries(cuenta).filter(([g, o]) => Object.values(o).reduce((a,b)=>a+b,0) >= 12).sort((a,b) => (a[0] === 'Todos' ? -1 : b[0] === 'Todos' ? 1 : Object.values(b[1]).reduce((x,y)=>x+y,0) - Object.values(a[1]).reduce((x,y)=>x+y,0))).slice(0, 9);
@@ -2158,7 +2168,7 @@ function movimientoDelito(base){
   const pts = base.filter(r => latlon(r) && fechaFinal(r) && esAnal(r) && val(r,'modal') !== 'Hallazgo' && (r.fchk === 'OK' || r.fchk === 'SIN HORA' || r.f.fecha1))
     .map(r => { const ll = latlon(r); return { r, ll: [+ll[0], +ll[1]], f: fechaFinal(r) }; });
   if (pts.length < 30) return null;
-  const cargas = base.map(r => r.fcarga).filter(Boolean).sort(), fs = pts.map(p => p.f).sort(), d1 = fs.at(-1), d0 = [fs[Math.floor(fs.length * 0.02)], cargas[0] || ''].sort().at(-1), nDias = diasEntre(d1, d0) + 1;
+  const fs = pts.map(p => p.f).sort(), d1 = fs.at(-1), d0 = [inicioDatos(base), fs[0]].sort().at(-1), nDias = diasEntre(d1, d0) + 1;
   const out = { d1, nDias };
   // 1) zonas que se encienden / se apagan: última semana contra el promedio semanal anterior (celdas de ~400 m)
   if (nDias >= 14) {
@@ -2259,6 +2269,52 @@ function lesionesHTML(LS, conPersonas){
     <p class="hint">Los DNI y nombres quedan solo en esta computadora: no salen en el informe ni en el parte.</p>` : ''}
     <p class="hint" style="margin:10px 0 3px"><b>Por comisaría</b></p>
     <table class="t"><tr><th>Comisaría</th><th>Hechos</th><th>Lesiones</th><th>Pareja / familiar</th><th>Con arma</th></tr>${X.com.slice(0, 25).map(([c, x]) => `<tr><td>${esc(c.replace(/^CRIA\./,''))}</td><td>${x.n}</td><td>${x.les}</td><td>${x.par}</td><td>${x.arma}</td></tr>`).join('')}</table>`;
+}
+
+/* =====================================================================
+   SALUD DE LOS DATOS Y COPIA DE SEGURIDAD
+   ===================================================================== */
+const CAMPOS_SALUD = [['delito','Delito'], ['modal','Modalidad'], ['comisaria','Comisaría'], ['arma','Arma'], ['naut','Cantidad de autores'], ['movil','Movilidad'], ['obj','Objeto'], ['ingreso','Ingreso'], ['vsexo','Sexo víctima'], ['vedad','Edad víctima'], ['aprh','Aprehendidos'], ['vinculo','Vínculo (lesiones)']];
+const semanaTxt = iso => { const d = new Date(iso + 'T12:00:00'), w = (d.getDay() + 6) % 7; d.setDate(d.getDate() - w); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+function saludDatos(){
+  const todos = mios().filter(r => val(r,'delito') && catR(r) !== 'fuera'), hechos = todos.filter(r => (r.f.estado || 'Pendiente') !== 'Descartar');
+  const comp = hechos.filter(r => r.f.estado === 'Completo'), conMapa = comp.filter(r => visibles(r).mapa);
+  const ubic = conMapa.filter(r => ['Confirmada','Corregida','OK'].includes(r.f.coord)).length, sinDato = conMapa.filter(r => r.f.coord === 'Sin dato').length;
+  const hora = comp.filter(r => (r.fchk === 'OK' || r.f.hora1 || r.f.fecha1) && horaFinal(r)).length;
+  // correcciones: la operadora cambió lo que sugería NEXO
+  const corr = CAMPOS_SALUD.map(([k, l]) => { let n = 0, c = 0; comp.forEach(r => { if (!r.f[k]) return; const s = (() => { const f0 = r.f[k]; delete r.f[k]; delete r._s; const v = (sug(r, k) || {}).v; r.f[k] = f0; delete r._s; return v; })(); if (!s) return; n++; if (String(s) !== String(r.f[k])) c++; }); return { k, l, n, c }; }).filter(x => x.n >= 5);
+  // semana a semana (por fecha en que se guardó)
+  const sem = {}; comp.forEach(r => { const d = String(r.f.ts || '').slice(0, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return; const w = semanaTxt(d), x = (sem[w] ||= { n:0, s:0, h:0, u:0, um:0 }); x.n++; if (r.f.secs) { x.s += r.f.secs; x.h++; } if (visibles(r).mapa) { x.um++; if (['Confirmada','Corregida','OK'].includes(r.f.coord)) x.u++; } });
+  const ops = {}; comp.forEach(r => { const o = r.f.oper || 'Sin nombre', x = (ops[o] ||= { n:0, s:0, h:0, c:0, cn:0 }); x.n++; if (r.f.secs) { x.s += r.f.secs; x.h++; } });
+  return { total: hechos.length, comp: comp.length, conMapa: conMapa.length, ubic, sinDato, hora, corr, sem: Object.entries(sem).sort((a, b) => a[0].localeCompare(b[0])).slice(-8), ops: Object.entries(ops).sort((a, b) => b[1].n - a[1].n) };
+}
+function saludHTML(){
+  const S = saludDatos();
+  if (S.comp < 10) return `<h3>Salud de los datos</h3><p class="hint">Se calcula con los hechos ya cargados por las operadoras (hay ${S.comp}). Importá sus avances para verla.</p>`;
+  const pct = (a, b) => b ? Math.round(100 * a / b) : 0, sem = (v, ok, med) => v >= ok ? 'ok' : v >= med ? 'warn' : 'bad';
+  const pu = pct(S.ubic, S.conMapa), ph = pct(S.hora, S.comp);
+  const peor = [...S.corr].sort((a, b) => b.c / b.n - a.c / a.n);
+  return `<h3>Salud de los datos</h3>
+    <p class="hint" style="margin:0 0 6px">Sobre los ${S.comp} hechos ya cargados por las operadoras (de ${S.total}). Te dice si el análisis es confiable.</p>
+    <div class="paq" style="gap:6px">
+      <span class="flag ${sem(pu, 85, 70)}" style="font-size:12.5px;white-space:normal">Ubicación confirmada: ${pu}%</span>
+      <span class="flag ${sem(ph, 80, 60)}" style="font-size:12.5px;white-space:normal">Hora confiable: ${ph}%</span>
+      <span class="flag info" style="font-size:12.5px;white-space:normal">Sin ubicación: ${pct(S.sinDato, S.conMapa)}%</span>
+    </div>
+    <p class="hint" style="margin:6px 0 0">${pu >= 85 && ph >= 80 ? '<b style="color:var(--ok)">Datos confiables:</b> los mapas, series y patrones se pueden mostrar con seguridad.' : '<b style="color:var(--signal)">Todavía no:</b> con ubicación confirmada por debajo de 85% u hora por debajo de 80%, los mapas y patrones pueden fallar. Conviene revisar con las operadoras.'}</p>
+    ${peor.length ? `<p class="hint" style="margin:10px 0 3px"><b>Dónde se equivoca NEXO</b>: cuántas veces la operadora cambió lo que sugería NEXO. Si baja semana a semana, las sugerencias mejoran.</p>
+      <table class="t"><tr><th>Campo</th><th>Revisados</th><th>Corregidos</th></tr>${peor.map(x => `<tr><td>${esc(x.l)}</td><td>${x.n}</td><td><b style="color:${x.c / x.n > 0.3 ? 'var(--bad)' : x.c / x.n > 0.15 ? 'var(--signal)' : 'inherit'}">${pct(x.c, x.n)}%</b> (${x.c})</td></tr>`).join('')}</table>` : ''}
+    ${S.sem.length ? `<p class="hint" style="margin:10px 0 3px"><b>Semana a semana</b> (por la fecha en que se cargó)</p>
+      <table class="t"><tr><th>Semana del</th><th>Hechos cargados</th><th>Min por hecho</th><th>Ubicación confirmada</th></tr>${S.sem.map(([w, x]) => `<tr><td>${fmtF(w)}</td><td>${x.n}</td><td>${x.h ? (x.s / x.h / 60).toFixed(1) : '—'}</td><td>${x.um ? pct(x.u, x.um) + '%' : '—'}</td></tr>`).join('')}</table>` : ''}
+    ${S.ops.length > 1 ? `<p class="hint" style="margin:10px 0 3px"><b>Por operadora</b></p><table class="t"><tr><th>Operadora</th><th>Hechos cargados</th><th>Min por hecho</th></tr>${S.ops.map(([o, x]) => `<tr><td>${esc(o)}</td><td>${x.n}</td><td>${x.h ? (x.s / x.h / 60).toFixed(1) : '—'}</td></tr>`).join('')}</table>` : ''}`;
+}
+// copia de seguridad: aviso si pasaron 7 días sin exportar el consolidado
+function backupHTML(){
+  if (MODO !== 'supervisor' || !RECS.size) return '';
+  const u = lsGet(MODO + '_rd_backup', ''), dias = u ? diasEntre(todayISO(), u) : null;
+  if (dias != null && dias < 7) return '';
+  return `<div class="ia" style="border-color:var(--signal);background:var(--signal-soft);margin-bottom:10px"><b class="lab" style="color:var(--signal)">Copia de seguridad</b>${dias == null ? 'Todavía no hiciste ninguna copia de seguridad.' : `Hace ${dias} días que no hacés una copia.`} Todo lo cargado vive en el navegador de esta computadora: si se borra el historial o falla la PC, se pierde. Tocá “Exportar consolidado” y guardá el Excel en un pendrive o carpeta segura. Con ese archivo se recupera todo (“Importar avances”).
+    <div style="margin-top:6px"><button class="btn primary sm" data-act="backupYa">Hacer la copia ahora</button></div></div>`;
 }
 
 function alertasHTML(N, R){
@@ -2548,6 +2604,7 @@ document.addEventListener('click', e => {
   if (a === 'cfgAnal') { $('#modalBody').className = ''; $('#modalBody').innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h2 style="margin:0">Qué se analiza</h2><button class="btn primary sm" onclick="document.getElementById('modal').hidden=true">Listo</button></div>
       <p class="hint">Cambiá un delito y el análisis se actualiza al instante. Para sumar un delito, pasalo a “Analizar”; para sacarlo, a “Fuera”.</p><div id="cfgModal"></div><div id="paqModal"></div>`; renderCfg($('#cfgModal')); refrescarPaquetes(); $('#modal').hidden = false; return; }
   if (a === 'cfgArchivo') return descargarConfig();
+  if (a === 'backupYa') return exportar();
   if (a === 'focoLes') { FOCO = { les: true }; pintarMapa._fit = false; return reAnalisis(); }
   if (a === 'filtrosOff') { ['aPar','aCom','aDel','aFr','aApr'].forEach(id => { if ($('#' + id)) $('#' + id).value = ''; }); FOCO = null; return renderAnalisis(); }
   if (a === 'focoOff') { FOCO = null; pintarMapa._fit = false; return reAnalisis(); }
