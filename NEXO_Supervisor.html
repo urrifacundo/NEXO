@@ -355,9 +355,9 @@ const AVISO_RESPALDO = 25;
 const ASIG_OPS = ASIGNACIONES.filter(a => !/supervisor/i.test(a.nombre));
 const zonaDe = a => a.nombre.replace(/^Zona /, '');
 /* qué se analiza: cada delito (o delito · modalidad) es "analizar", "mapa" (contexto: zonas de venta o violencia) o "fuera" */
-const CAT_DEF = { 'ROBO':'analizar', 'HURTO':'analizar', 'NARCOMENUDEO':'mapa', 'ARMAS':'mapa', 'HOMICIDIO':'mapa', 'OTROS GRAVES':'mapa', 'OTROS GRAVES · Abuso sexual en vía pública':'mapa', 'OTROS GRAVES · Privación de la libertad':'mapa', 'OTROS GRAVES · Usurpación':'fuera', 'AUTOMOTOR':'fuera', 'ESTAFA':'fuera', 'LESIONES':'aparte' };
+const CAT_DEF = { 'ROBO':'analizar', 'HURTO':'analizar', 'NARCOMENUDEO':'mapa', 'ARMAS':'mapa', 'HOMICIDIO':'mapa', 'OTROS GRAVES':'mapa', 'OTROS GRAVES · Abuso sexual en vía pública':'mapa', 'OTROS GRAVES · Privación de la libertad':'mapa', 'OTROS GRAVES · Usurpación':'fuera', 'AUTOMOTOR':'fuera', 'MOTOS':'analizar', 'ESTAFA':'fuera', 'LESIONES':'aparte' };
 const CAT_ITEMS = [['ROBO','Robos (todas las modalidades)'], ['HURTO','Hurtos'], ['NARCOMENUDEO','Venta de droga (en el mapa: zonas de venta)'], ['ARMAS','Armas: disparos, heridos, secuestro (en el mapa: violencia)'], ['HOMICIDIO','Homicidios (en el mapa: violencia)'],
-  ['OTROS GRAVES · Abuso sexual en vía pública','Abuso sexual en vía pública (en el mapa: violencia)'], ['OTROS GRAVES · Privación de la libertad','Privación de la libertad / secuestro express (en el mapa: violencia)'], ['OTROS GRAVES · Usurpación','Usurpación'], ['AUTOMOTOR','Robo automotor y hallazgos'], ['ESTAFA','Estafas'], ['LESIONES','Lesiones y amenazas (módulo aparte, ficha propia)']];
+  ['OTROS GRAVES · Abuso sexual en vía pública','Abuso sexual en vía pública (en el mapa: violencia)'], ['OTROS GRAVES · Privación de la libertad','Privación de la libertad / secuestro express (en el mapa: violencia)'], ['OTROS GRAVES · Usurpación','Usurpación'], ['AUTOMOTOR','Robo de autos y camionetas, y sus hallazgos'], ['MOTOS','Robo de motos y sus hallazgos'], ['ESTAFA','Estafas'], ['LESIONES','Lesiones y amenazas (módulo aparte, ficha propia)']];
 let CATCFG = null;
 function catDe(d, m){ if (!CATCFG) CATCFG = Object.assign({}, CAT_DEF, lsGet(MODO + '_rd_cat', {})); return CATCFG[d + ' · ' + m] || CATCFG[d] || 'analizar'; }
 let OPS_ZONA = null; const opsZona = z => { if (!OPS_ZONA) OPS_ZONA = lsGet(MODO + '_rd_opszona', {}); return OPS_ZONA[z] || 1; };
@@ -636,7 +636,11 @@ function sug(r, k){
   r._s[ck] = s; return s;
 }
 const val = (r, k) => r.f[k] || (sug(r, k) || {}).v || '';
-const catR = r => catDe(val(r,'delito'), val(r,'modal'));
+// motos: se configuran aparte de autos (el Auditor de automotores es solo de autos)
+const RX_MOTO = /\b(moto|motos|motocicleta|motovehiculo|ciclomotor|cuatriciclo|gilera|zanella|honda wave|motomel|corven|keller|mondial|yamaha|bajaj|guerrero|beta|brava)\b/i;
+const vehEsMoto = (veh, txt) => { const v = (veh || []).find(x => /^(sustra|secuest|aband)/.test(x.vinculo)); return v ? RX_MOTO.test(v.marca + ' ' + v.modelo) : RX_MOTO.test(norm(txt || '')); };
+const esMoto = r => val(r,'tveh') ? val(r,'tveh') === 'Moto' : vehEsMoto(r.cal0?.veh, (r.cal || '') + ' ' + String(r.relato || '').slice(0, 600));
+const catR = r => val(r,'delito') === 'AUTOMOTOR' && esMoto(r) ? catDe('MOTOS', '') : catDe(val(r,'delito'), val(r,'modal'));
 const esAnal = r => catR(r) === 'analizar';
 const esViol = r => catR(r) === 'mapa' && val(r,'delito') !== 'NARCOMENUDEO';
 const isSug = (r, k) => !r.f[k] && !!(sug(r, k) || {}).v;
@@ -725,7 +729,7 @@ let sinceExport = lsGet(MODO + '_rd_since', 0);
 let map = null, mk = null;
 let SERIES_EST = lsGet(MODO + '_rd_series', {});
 
-const mios = () => { const ps = new Set((OP?.partidos||[]).map(normP)); return [...RECS.values()].filter(r => ps.has(normP(r.partido)) && !(MODO === 'operadora' && !r.f.delito && (r.f.estado || 'Pendiente') === 'Pendiente' && catR(r) === 'fuera')); };
+const mios = () => { const ps = new Set((OP?.partidos||[]).map(normP)); return [...RECS.values()].filter(r => ps.has(normP(r.partido)) && !(MODO === 'operadora' && !r.f.delito && !r.f.tveh && (r.f.estado || 'Pendiente') === 'Pendiente' && catR(r) === 'fuera')); };
 const fechaFinal = r => r.f.fecha1 || r.fecha;
 const horaFinal = r => r.f.hora1 || r.hora;
 const diaDe = r => { const f = fechaFinal(r); return f ? DIAS[new Date(f+'T12:00:00').getDay()] : ''; };
@@ -833,7 +837,7 @@ function aplicarConfig(wb){
   lsSet(MODO + '_rd_cat', o); CATCFG = null; return true;
 }
 function hojaConfig(){ catDe('', ''); return XLSX.utils.json_to_sheet(Object.entries(CATCFG).map(([clave, valor]) => ({ clave, valor }))); }
-function catFila(x){ const iaDel = x.IA_delito ? String(x.IA_delito).toUpperCase().trim() : '', c = clasificarCaratula(x.calificaciones, x.relato); return catDe(DELITOS.includes(iaDel) ? iaDel : c.cat, (DELITOS.includes(iaDel) ? x.IA_modalidad : c.mod) || ''); }
+function catFila(x){ const iaDel = x.IA_delito ? String(x.IA_delito).toUpperCase().trim() : '', c = clasificarCaratula(x.calificaciones, x.relato); const d0 = DELITOS.includes(iaDel) ? iaDel : c.cat; if (d0 === 'AUTOMOTOR' && vehEsMoto(c.veh, String(x.calificaciones || '') + ' ' + String(x.relato || '').slice(0, 600))) return catDe('MOTOS', ''); return catDe(DELITOS.includes(iaDel) ? iaDel : c.cat, (DELITOS.includes(iaDel) ? x.IA_modalidad : c.mod) || ''); }
 function filasPaquete(a){ const ps = new Set(a.partidos.map(normP)); return LAST_ROWS.filter(x => ps.has(normP(x.partido_hecho)) && esUtil(x) && catFila(x) !== 'fuera'); }
 const idFila = x => String(x.delito_id ?? x.ipp ?? x.nro_registro).trim();
 // reparte el paquete de una zona entre sus operadoras: cada dependencia entera a una sola, en partes parejas
@@ -850,7 +854,7 @@ function filaDeRec(r){ return { delito_id: r.id, ipp: r.ipp, fecha_carga: r.fcar
   latitud: r.lat0, longitud: r.lon0, calle: r.calle, altura: r.altura, entre: r.entre, calificaciones: r.cal, relato: r.relato }; }
 function complementarios(){
   const sumar = lsGet(MODO + '_rd_sumar', []); if (!sumar.length) return [];
-  const toca = r => { const d = r.cal0?.cat || val(r,'delito'), m = r.cal0?.mod || val(r,'modal'); return sumar.includes(d) || sumar.includes(d + ' · ' + m); };
+  const toca = r => { const d = r.cal0?.cat || val(r,'delito'), m = r.cal0?.mod || val(r,'modal'); if (d === 'AUTOMOTOR' && esMoto(r)) return sumar.includes('MOTOS'); return sumar.includes(d) || sumar.includes(d + ' · ' + m); };
   const cand = mios().filter(r => !r.paq && !r.f.delito && (r.f.estado || 'Pendiente') === 'Pendiente' && r.relato && catR(r) !== 'fuera' && toca(r));
   const out = [];
   ASIG_OPS.forEach((a, i) => {
@@ -1126,7 +1130,7 @@ function renderForm(){
   const domsRel = v.veh ? dominiosEn(r.relato).filter(x => x !== normDom(val(r,'dom'))) : [];
   const ds = sug(r,'delito');
   $('#form').innerHTML = `<div class="fbody">${mismoHechoHTML(r)}
-    <div class="frow"><label>Delito <em>*</em></label><div>${chips(r, 'delito', DELITOS.filter(x => catDe(x, '') !== 'fuera' || val(r,'delito') === x), true)}${DELITOS.some(x => catDe(x, '') === 'fuera') ? `<div class="hint">No se cargan: ${DELITOS.filter(x => catDe(x, '') === 'fuera').map(x => x.toLowerCase()).join(', ')}. Si el hecho es de esos, tocá “Descartar”.</div>` : ''}${!r.f.delito && ds ? `<div class="def">Sugerido por ${esc(ds.why)}.</div>` : !ds && !r.f.delito ? '<div class="def" style="color:var(--signal)">Sin sugerencia: leé el relato y elegí, o Descartar.</div>' : ''}</div></div>
+    <div class="frow"><label>Delito <em>*</em></label><div>${chips(r, 'delito', DELITOS.filter(x => catDe(x, '') !== 'fuera' || val(r,'delito') === x || (x === 'AUTOMOTOR' && catDe('MOTOS', '') !== 'fuera')), true)}${(() => { const no = DELITOS.filter(x => catDe(x, '') === 'fuera').map(x => x === 'AUTOMOTOR' && catDe('MOTOS', '') !== 'fuera' ? 'robo de autos y camionetas (las motos sí se cargan, como automotor)' : x.toLowerCase()); return no.length ? `<div class="hint">No se cargan: ${no.join(', ')}. Si el hecho es de esos, tocá “Descartar”.</div>` : ''; })()}${!r.f.delito && ds ? `<div class="def">Sugerido por ${esc(ds.why)}.</div>` : !ds && !r.f.delito ? '<div class="def" style="color:var(--signal)">Sin sugerencia: leé el relato y elegí, o Descartar.</div>' : ''}</div></div>
     ${d ? `<div class="frow"><label>Modalidad <em>*</em></label><div>${chips(r, 'modal', mods.map(x => x[0]))}${def ? `<div class="def">${esc(def)}</div>` : ''}</div></div>` : ''}
     <div class="frow"><label>Fecha / hora</label><div><div class="two">
       <input type="date" class="txt${!r.f.fecha1 && necesitaF && sf ? ' sug' : ''}" data-in="fecha1" id="i_fecha1" value="${esc(r.f.fecha1 || (necesitaF && !r.fecha && sf ? sf.v : '') || r.fecha || '')}">
@@ -3005,6 +3009,7 @@ window.addEventListener('beforeunload', () => { guardarTiempo(); const r = RECS.
   await openDB();
   (await dbAll()).forEach(r => { if (!r.cal0) r.cal0 = { cat:null, mod:'', why:'', veh:[] }; RECS.set(r.id, r); });
   if (MODO === 'supervisor') await unirHuerfanos();
+  if (MODO === 'supervisor' && !lsGet(MODO + '_rd_motos_ini', false)) { lsSet(MODO + '_rd_sumar', [...new Set([...lsGet(MODO + '_rd_sumar', []), 'MOTOS'])]); lsSet(MODO + '_rd_motos_ini', true); }
   if (MODO === 'supervisor' && !lsGet(MODO + '_rd_les_ini', false)) { lsSet(MODO + '_rd_sumar', [...new Set([...lsGet(MODO + '_rd_sumar', []), 'LESIONES'])]); lsSet(MODO + '_rd_les_ini', true); }
   if (MODO === 'supervisor') { const sucios = []; for (const r of RECS.values()) { try { if (limpiarSugeridos(r)) sucios.push(r); } catch(e){} } if (sucios.length) await dbPut(sucios); }
   (await capasDbGet()).forEach(c => { CAPAS[c.id] = c; }); renderCapasSetup(); renderCfg(); await accionesCargar();
