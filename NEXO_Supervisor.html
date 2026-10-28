@@ -870,7 +870,7 @@ function complementarios(){
     const dueño = {}; mios().forEach(r => { if (r.paq && labels.includes(r.paq)) { const d = String(r.dep || '').trim().toUpperCase(); (dueño[d] ||= {})[r.paq] = ((dueño[d] || {})[r.paq] || 0) + 1; } });
     const g = {}; rs.forEach(r => { const d = String(r.dep || 'Sin dependencia').trim().toUpperCase(); (g[d] ||= []).push(r); });
     Object.entries(g).sort((x, y) => y[1].length - x[1].length).forEach(([d, gr]) => { const pref = dueño[d] && Object.entries(dueño[d]).sort((x, y) => y[1] - x[1])[0][0];
-      (partes.find(p => p.label === pref) || partes.reduce((m, p) => p.recs.length < m.recs.length ? p : m)).recs.push(...gr); });
+      (partes.find(p => p.label === pref) || partes[[...d].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % partes.length]).recs.push(...gr); });
     partes.filter(p => p.recs.length).forEach(p => out.push(p));
   });
   return out;
