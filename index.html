@@ -2499,7 +2499,18 @@ function reiteradosHTML(X){
 }
 
 /* ---------- 6) parte para el mando: un HTML para el celular ---------- */
-function generarParte(){
+// mapa fijo para el PDF: robos y hurtos en gris y las alertas en color, sin calles de fondo
+function mapaParteSVG(anal, marc){
+  const pts = anal.map(r => latlon(r)).filter(Boolean).map(ll => [+ll[0], +ll[1]]), todos = pts.concat(marc.map(m => m.ll)); if (!todos.length) return '';
+  const la = todos.map(p => p[0]).sort((a, b) => a - b), lo = todos.map(p => p[1]).sort((a, b) => a - b), q = (a, p) => a[Math.floor(p * (a.length - 1))];
+  const la0 = q(la, .02), la1 = q(la, .98), lo0 = q(lo, .02), lo1 = q(lo, .98), W = 600, ky = Math.cos((la0 + la1) / 2 * Math.PI / 180), H = Math.max(300, Math.min(700, W * (la1 - la0) / ((lo1 - lo0) * ky || 1)));
+  const X = o => 15 + (o - lo0) / ((lo1 - lo0) || 1) * (W - 30), Y = a => 15 + (la1 - a) / ((la1 - la0) || 1) * (H - 30), dentro = p => p[0] >= la0 && p[0] <= la1 && p[1] >= lo0 && p[1] <= lo1;
+  const kmPx = (W - 30) / (((lo1 - lo0) || 1) * 111.32 * ky);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#fff;border-radius:10px;border:1px solid #DDE2DA">${pts.filter(dentro).map(p => `<circle cx="${X(p[1]).toFixed(1)}" cy="${Y(p[0]).toFixed(1)}" r="2" fill="#9AA3AB" fill-opacity=".6"/>`).join('')}
+    ${marc.filter(m => dentro(m.ll)).map((m, i) => `<circle cx="${X(m.ll[1]).toFixed(1)}" cy="${Y(m.ll[0]).toFixed(1)}" r="${Math.max(6, m.r / 1000 * kmPx).toFixed(1)}" fill="${m.c}" fill-opacity=".25" stroke="${m.c}" stroke-width="2"/>`).join('')}
+    ${marc.filter(m => dentro(m.ll) && /^Ventana/.test(m.t)).map(m => `<text x="${X(m.ll[1]).toFixed(1)}" y="${(Y(m.ll[0]) + 4).toFixed(1)}" font-size="11" font-weight="700" text-anchor="middle" fill="#1D4A73" font-family="Arial">${m.t.match(/Ventana (\d+)/)[1]}</text>`).join('')}</svg>`;
+}
+function generarParte(tipo){
   const base = LAST_BASE, fp = $('#aPar')?.value || '', fc = $('#aCom')?.value || '';
   if (!base.length) return toast('Abrí el análisis primero.');
   const anal = base.filter(esAnal), fs = anal.map(fechaFinal).filter(Boolean).sort(), d1 = fs.at(-1), ini = sumaDias(d1, -6), d0 = inicioDatos(base);
@@ -2521,10 +2532,11 @@ function generarParte(){
   const tarjeta = (titulo, cuerpo, color) => `<div class="card" style="border-left-color:${color}"><b>${titulo}</b><div>${cuerpo}</div></div>`;
   const zonaTxt = [fp, fc.replace(/^CRIA\./,'')].filter(Boolean).join(' · ') || (OP?.partidos || []).join(' · ');
   const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NEXO · Parte para el mando</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+${tipo === 'pdf' ? '' : '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>'}
 <style>body{margin:0;font:15px/1.45 -apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#F2F4F1;color:#17202A}header{background:#1D4A73;color:#fff;padding:16px}header h1{margin:0;font-size:19px}header p{margin:4px 0 0;font-size:13px;opacity:.85}
 main{padding:12px;max-width:640px;margin:0 auto}h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#5B6670;margin:20px 0 8px}.nums{display:grid;grid-template-columns:1fr 1fr;gap:8px}.num{background:#fff;border-radius:10px;padding:10px 12px}.num b{font-size:26px;display:block}.num span{font-size:12.5px;color:#5B6670}
-.card{background:#fff;border-radius:10px;padding:10px 12px;margin:0 0 8px;border-left:5px solid #1D4A73}.card div{font-size:14px;color:#3A4550;margin-top:2px}#mapa{height:340px;border-radius:10px;margin:6px 0}.hint{font-size:12px;color:#5B6670}.big{background:#fff;border-radius:10px;padding:12px;font-size:15px}</style></head><body>
+.card{background:#fff;border-radius:10px;padding:10px 12px;margin:0 0 8px;border-left:5px solid #1D4A73}.card div{font-size:14px;color:#3A4550;margin-top:2px}#mapa{height:340px;border-radius:10px;margin:6px 0}.hint{font-size:12px;color:#5B6670}.big{background:#fff;border-radius:10px;padding:12px;font-size:15px}
+@media print{body{background:#fff}header{-webkit-print-color-adjust:exact;print-color-adjust:exact}.card,.num,.big{break-inside:avoid;border:1px solid #DDE2DA}.card{-webkit-print-color-adjust:exact;print-color-adjust:exact}main{max-width:none}@page{margin:12mm}}</style></head><body>
 <header><h1>NEXO · Parte para el mando</h1><p>${esc(zonaTxt)}<br>Semana del ${fmtF(ini)} al ${fmtF(d1)} · generado el ${new Date().toLocaleDateString('es-AR')}</p></header><main>
 <h2>La semana en números</h2><div class="nums">
 <div class="num"><b>${ult.length}</b><span>robos y hurtos${varTxt(ult.length, prev) ? '<br>' + varTxt(ult.length, prev) : ''}</span></div>
@@ -2533,7 +2545,7 @@ ${['ROBO','HURTO'].map(d => { const x = porDel(d); return `<div class="num"><b>$
 ${sem ? `<p class="hint">Descontando el clima de la semana, la variación real es ${Math.round((sem.obs / sem.esperado - 1) * 100)}%.</p>` : ''}
 ${V && V.lista.length ? `<h2>Dónde y cuándo poner presencia</h2><div class="big">Con presencia en estas <b>${V.lista.length} ventanas</b> se cubre el <b>${Math.round(100 * V.cubiertos / V.total)}%</b> de los robos y hurtos.</div>
 ${V.lista.map(v => tarjeta(`${v.i + 1}. ${esc(v.g)} · ${FR_TXT[v.fr]}`, `${esc(v.calle)}, ${esc(v.loc)} · ${v.items.length} hechos (${esc(v.mods)})<br><span class="hint">${esc(v.com.replace(/^CRIA\./,''))}</span>`, '#1D4A73')).join('')}` : ''}
-<h2>Mapa</h2><div id="mapa"></div><p class="hint">Azul: ventanas de prevención · rojo: zonas de venta · bordó: venta con violencia · naranja: zonas que se encendieron. Requiere internet.</p>
+<h2>Mapa</h2>${tipo === 'pdf' ? mapaParteSVG(anal, marc) : '<div id="mapa"></div>'}<p class="hint">Azul: ventanas de prevención · rojo: zonas de venta · bordó: venta con violencia · naranja: zonas que se encendieron.${tipo === 'pdf' ? ' Los puntos grises son los robos y hurtos.' : ' Requiere internet.'}</p>
 <h2>Alertas</h2>
 ${zonas.length ? tarjeta(`Zonas de venta de droga (4 o más puntos seguidos): ${zonas.length}`, zonas.slice(0, 5).map(z => esc([...new Set(z.m.map(x => x.r.localidad))].join(', ')) + ` (${z.n} puntos)`).join('<br>'), '#B5172E') : ''}
 ${viol.map(g => tarjeta(`Venta de droga con violencia: ${esc(g.miembros[0].r.localidad)}`, `${esc(g.miembros[0].r.calle)} ${esc(g.miembros[0].r.altura)} · ${g.heridos ? g.heridos + ' herido(s) u homicidio · ' : ''}${g.violentos.length} hechos violentos cerca`, '#7B1E2B')).join('')}
@@ -2546,9 +2558,10 @@ ${!zonas.length && !viol.length && !reinc.length && !(M?.enc || []).length && !p
 ${O.n >= 3 ? `<h2>De dónde vienen los aprehendidos</h2><div class="big">${Math.round(100 * (O.n - O.local) / O.n)}% vive en otra localidad que la del hecho${O.kmMed != null ? ` · distancia típica ${O.kmMed.toFixed(1)} km` : ''}.${O.corr.length ? '<br>' + O.corr.slice(0, 3).map(([k, n]) => `${esc(k)} (${n})`).join('<br>') : ''}</div>` : ''}
 ${ACC.length ? `<h2>Resultado de las acciones</h2>${ACC.map(x => tarjeta(esc(x.a.desc), `Desde ${fmtF(x.a.fecha)}: ${x.za} → ${x.zd} hechos (${x.cambio > 0 ? '+' : ''}${Math.round(x.cambio * 100)}%)${x.resto != null ? `; el resto ${x.resto > 0 ? '+' : ''}${Math.round(x.resto * 100)}%` : ''}`, '#2C7A4B')).join('')}` : ''}
 <p class="hint" style="margin-top:20px">Analiza robos y hurtos (delitos prevenibles). Venta de droga y violencia, como contexto. Sin datos personales. Hecho con NEXO.</p></main>
-<script>try{const M=${JSON.stringify(marc)};const m=L.map('mapa');L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(m);const b=[];M.forEach(x=>{L.circle(x.ll,{radius:x.r,color:x.c,weight:2,fillOpacity:.25}).bindPopup(x.t).addTo(m);b.push(x.ll)});if(b.length)m.fitBounds(b,{padding:[20,20],maxZoom:15});else m.setView([-34.7,-58.5],11)}catch(e){document.getElementById('mapa').outerHTML='<p class="hint">El mapa necesita internet.</p>'}<\/script></body></html>`;
+${tipo === 'pdf' ? '<script>setTimeout(()=>window.print(),500)<\/script>' : ''}<script>if(window.L)try{const M=${JSON.stringify(marc)};const m=L.map('mapa');L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(m);const b=[];M.forEach(x=>{L.circle(x.ll,{radius:x.r,color:x.c,weight:2,fillOpacity:.25}).bindPopup(x.t).addTo(m);b.push(x.ll)});if(b.length)m.fitBounds(b,{padding:[20,20],maxZoom:15});else m.setView([-34.7,-58.5],11)}catch(e){document.getElementById('mapa').outerHTML='<p class="hint">El mapa necesita internet.</p>'}<\/script></body></html>`;
+  if (tipo === 'pdf') { const w = window.open('', '_blank'); if (!w) return toast('El navegador bloqueó la ventana. Permití las ventanas emergentes para este sitio.'); w.document.write(html); w.document.close(); toast('En la ventana de impresión elegí “Guardar como PDF” y mandá ese PDF por WhatsApp.', 5000); return html; }
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html], { type:'text/html' })); a.download = `NEXO_Parte_mando_${todayISO()}.html`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-  toast('Parte descargado: mandalo por WhatsApp; se abre en el celular.', 4000);
+  toast('Página descargada. En el celular se abre con Chrome (tocar el archivo → abrir con Chrome).', 5000);
   return html;
 }
 
@@ -2864,7 +2877,12 @@ document.addEventListener('click', e => {
       <p class="hint">Cambiá un delito y el análisis se actualiza al instante. Para sumar un delito, pasalo a “Analizar”; para sacarlo, a “Fuera”.</p><div id="cfgModal"></div><div id="paqModal"></div>`; renderCfg($('#cfgModal')); refrescarPaquetes(); $('#modal').hidden = false; return; }
   if (a === 'pFiltros' || a === 'pIr') { PANEL = PANEL === (a === 'pFiltros' ? 'filtros' : 'ir') ? '' : (a === 'pFiltros' ? 'filtros' : 'ir'); return reAnalisis(); }
   if (a === 'cfgArchivo') return descargarConfig();
-  if (a === 'parte') return generarParte();
+  if (a === 'parte') { $('#modalBody').className = ''; $('#modalBody').innerHTML = `<h2 style="margin:0 0 6px">Parte para el mando</h2><p class="hint">Sale con los filtros que tengas puestos (partido o comisaría). Sin relatos, nombres ni DNI.</p>
+      <div style="display:grid;gap:8px;margin-top:10px"><button class="btn primary" data-act="partePdf">PDF para WhatsApp (recomendado)</button><span class="hint">Se abre la ventana de impresión: elegí “Guardar como PDF” y mandá ese archivo. Se abre en cualquier celular.</span>
+      <button class="btn" data-act="parteHtml">Página interactiva (con mapa que se mueve)</button><span class="hint">Archivo .html: en el celular hay que abrirlo con Chrome y necesita internet para el mapa.</span>
+      <button class="btn sm" onclick="document.getElementById('modal').hidden=true">Cancelar</button></div>`; $('#modal').hidden = false; return; }
+  if (a === 'partePdf') { $('#modal').hidden = true; return generarParte('pdf'); }
+  if (a === 'parteHtml') { $('#modal').hidden = true; return generarParte('html'); }
   if (a === 'focoOrig') { FOCO = { orig: true }; pintarMapa._fit = false; return reAnalisis(); }
   if (a === 'bajarPuntos') return bajarPuntos();
   if (a === 'backupYa') return exportar();
