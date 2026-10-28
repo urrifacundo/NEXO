@@ -861,7 +861,7 @@ function complementarios(){
   const toca = r => { const d = r.cal0?.cat || val(r,'delito'), m = r.cal0?.mod || val(r,'modal'); if (d === 'AUTOMOTOR') return sumar.includes(esMoto(r) ? 'MOTOS' : 'AUTOMOTOR'); return sumar.includes(d) || sumar.includes(d + ' · ' + m); };
   // si el crudo cargado todavía no se repartió, esos hechos van en el paquete semanal, no en un complementario
   const idsCrudo = new Set(LAST_ROWS.map(idFila)), repartido = LAST_ROWS.some(x => RECS.get(idFila(x))?.paq);
-  const cand = mios().filter(r => !r.paq && !r.f.delito && (r.f.estado || 'Pendiente') === 'Pendiente' && r.relato && catR(r) !== 'fuera' && toca(r) && (repartido || !idsCrudo.has(r.id)));
+  const cand = mios().filter(r => !r.paq && !r.f.delito && (r.f.estado || 'Pendiente') === 'Pendiente' && r.relato && catR(r) !== 'fuera' && toca(r) && idsCrudo.has(r.id) && repartido);
   const out = [];
   ASIG_OPS.forEach((a, i) => {
     const ps = new Set(a.partidos.map(normP)), zn = zonaDe(a), k = opsZona(zn), rs = cand.filter(r => ps.has(normP(r.partido))); if (!rs.length) return;
@@ -891,6 +891,7 @@ function complementariosHTML(){
   const cs = complementarios();
   return (cs.length ? `<div style="margin-top:10px"><b>Delitos que sumaste</b>: estos hechos ya están en tu computadora pero las operadoras no los tienen. Mandale a cada una su paquete complementario (lo abre igual que el semanal y no pierde nada de lo cargado):</div>
     <div class="paq">${cs.map(p => `<button class="btn primary" data-comp="${esc(p.label)}">Complementario ${esc(p.label)} (${p.recs.length} hechos)</button>`).join('')}</div>` : '')
+    + (cs.length && LAST_ROWS.length ? `<p class="hint">Solo hechos del crudo que acabás de cargar (${(() => { const f = LAST_ROWS.map(x => toISODate(x.fecha_carga)).filter(Boolean).sort(); return f.length ? 'cargados en el sistema del ' + fmtF(f[0]) + ' al ' + fmtF(f.at(-1)) : 'este archivo'; })()}).</p>` : '')
     + `<div style="margin-top:8px"><button class="btn sm" data-act="cfgArchivo">Archivo “qué se carga” para las operadoras</button> <span class="hint">Si sacaste un delito, mandales este archivo: al abrirlo en NEXO Carga, lo que quedó afuera desaparece de sus pendientes.</span></div>`;
 }
 function refrescarPaquetes(){ const pb = $('#paqBox'); if (pb) pb.innerHTML = (LAST_ROWS.length ? paquetesHTML() : '') + complementariosHTML(); const pm = $('#paqModal'); if (pm) pm.innerHTML = complementariosHTML(); }
