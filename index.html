@@ -853,9 +853,15 @@ function partesPaquete(a){
 function filaDeRec(r){ return { delito_id: r.id, ipp: r.ipp, fecha_carga: r.fcarga, dependencia: r.dep, fecha_inicio_hecho: r.fecha, hora_inicio_hecho: r.hora, partido_hecho: r.partido, localidad_hecho: r.localidad,
   latitud: r.lat0, longitud: r.lon0, calle: r.calle, altura: r.altura, entre: r.entre, calificaciones: r.cal, relato: r.relato }; }
 function complementarios(){
-  const sumar = lsGet(MODO + '_rd_sumar', []); if (!sumar.length) return [];
-  const toca = r => { const d = r.cal0?.cat || val(r,'delito'), m = r.cal0?.mod || val(r,'modal'); if (d === 'AUTOMOTOR' && esMoto(r)) return sumar.includes('MOTOS'); return sumar.includes(d) || sumar.includes(d + ' · ' + m); };
-  const cand = mios().filter(r => !r.paq && !r.f.delito && (r.f.estado || 'Pendiente') === 'Pendiente' && r.relato && catR(r) !== 'fuera' && toca(r));
+  // se suman los delitos que estaban "Fuera" cuando se repartieron los últimos paquetes y ahora se cargan
+  const snap = lsGet(MODO + '_rd_cfg_envio', null) || Object.assign({}, CAT_DEF, { MOTOS:'fuera' });
+  const snapV = k => snap[k] ?? (k.includes(' · ') ? snap[k.split(' · ')[0]] : undefined) ?? 'analizar', curV = k => k.includes(' · ') ? catDe(k.split(' · ')[0], k.split(' · ')[1]) : catDe(k, '');
+  const sumar = CAT_ITEMS.map(([k]) => k).filter(k => snapV(k) === 'fuera' && curV(k) !== 'fuera');
+  if (!sumar.length) return [];
+  const toca = r => { const d = r.cal0?.cat || val(r,'delito'), m = r.cal0?.mod || val(r,'modal'); if (d === 'AUTOMOTOR') return sumar.includes(esMoto(r) ? 'MOTOS' : 'AUTOMOTOR'); return sumar.includes(d) || sumar.includes(d + ' · ' + m); };
+  // si el crudo cargado todavía no se repartió, esos hechos van en el paquete semanal, no en un complementario
+  const idsCrudo = new Set(LAST_ROWS.map(idFila)), repartido = LAST_ROWS.some(x => RECS.get(idFila(x))?.paq);
+  const cand = mios().filter(r => !r.paq && !r.f.delito && (r.f.estado || 'Pendiente') === 'Pendiente' && r.relato && catR(r) !== 'fuera' && toca(r) && (repartido || !idsCrudo.has(r.id)));
   const out = [];
   ASIG_OPS.forEach((a, i) => {
     const ps = new Set(a.partidos.map(normP)), zn = zonaDe(a), k = opsZona(zn), rs = cand.filter(r => ps.has(normP(r.partido))); if (!rs.length) return;
@@ -874,7 +880,6 @@ async function descargarComplementario(label){
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(p.recs.map(filaDeRec)), 'Hechos'); XLSX.utils.book_append_sheet(wb, hojaConfig(), 'NEXO_CONFIG');
   XLSX.writeFile(wb, `Paquete_${norm(label).replace(/[^a-z0-9]+/g,'_')}_complementario_${todayISO()}.xlsx`);
   p.recs.forEach(r => r.paq = label); await dbPut(p.recs);
-  if (!complementarios().length) lsSet(MODO + '_rd_sumar', []);
   toast(`Paquete complementario ${label}: ${p.recs.length} hechos.`); refrescarPaquetes();
 }
 function descargarConfig(){
@@ -900,6 +905,7 @@ async function descargarPaquete(i, j){
   if (!rows.length) return toast('No hay hechos para ese paquete en este Excel.');
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Hechos'); XLSX.utils.book_append_sheet(wb, hojaConfig(), 'NEXO_CONFIG');
   XLSX.writeFile(wb, `Paquete_${norm(p.label).replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')}_${todayISO()}.xlsx`);
+  catDe('', ''); lsSet(MODO + '_rd_cfg_envio', Object.assign({}, CATCFG));
   const marcados = []; rows.forEach(x => { const r = RECS.get(idFila(x)); if (r && r.paq !== p.label) { r.paq = p.label; marcados.push(r); } }); if (marcados.length) await dbPut(marcados);
   toast(`Paquete ${p.label} descargado: ${rows.length} hechos.`); refrescarPaquetes();
 }
@@ -1714,7 +1720,7 @@ function renderCfg(box){
     <div style="margin-top:10px"><b>Operadoras por zona</b> (mismos partidos; el paquete se reparte entre ellas)</div>
     <div class="paq">${ASIG_OPS.map(a => `<label class="hint" style="display:flex;gap:6px;align-items:center"><b>${esc(a.nombre)}</b> <select data-opszona="${esc(zonaDe(a))}">${[1,2,3,4].map(n => `<option${opsZona(zonaDe(a)) === n ? ' selected' : ''}>${n}</option>`).join('')}</select></label>`).join('')}</div>`;
   el.querySelectorAll('[data-cat]').forEach(s => s.onchange = () => { const antes = CATCFG[s.dataset.cat] || 'analizar'; const c = lsGet(MODO + '_rd_cat', {}); c[s.dataset.cat] = s.value; lsSet(MODO + '_rd_cat', c); CATCFG = null; catDe('', '');
-    let sm = lsGet(MODO + '_rd_sumar', []).filter(k => k !== s.dataset.cat); if (antes === 'fuera' && s.value !== 'fuera') sm.push(s.dataset.cat); lsSet(MODO + '_rd_sumar', sm); refrescarPaquetes(); if (box) { FOCO = null; reAnalisis(); } else renderCfg(); toast('Guardado.'); });
+    refrescarPaquetes(); if (box) { FOCO = null; reAnalisis(); } else renderCfg(); toast('Guardado.'); });
   el.querySelectorAll('[data-opszona]').forEach(s => s.onchange = () => { OPS_ZONA = Object.assign(lsGet(MODO + '_rd_opszona', {}), { [s.dataset.opszona]: +s.value }); lsSet(MODO + '_rd_opszona', OPS_ZONA); refrescarPaquetes(); toast('Guardado.'); });
 }
 function renderCapasSetup(){
@@ -3009,8 +3015,6 @@ window.addEventListener('beforeunload', () => { guardarTiempo(); const r = RECS.
   await openDB();
   (await dbAll()).forEach(r => { if (!r.cal0) r.cal0 = { cat:null, mod:'', why:'', veh:[] }; RECS.set(r.id, r); });
   if (MODO === 'supervisor') await unirHuerfanos();
-  if (MODO === 'supervisor' && !lsGet(MODO + '_rd_motos_ini', false)) { lsSet(MODO + '_rd_sumar', [...new Set([...lsGet(MODO + '_rd_sumar', []), 'MOTOS'])]); lsSet(MODO + '_rd_motos_ini', true); }
-  if (MODO === 'supervisor' && !lsGet(MODO + '_rd_les_ini', false)) { lsSet(MODO + '_rd_sumar', [...new Set([...lsGet(MODO + '_rd_sumar', []), 'LESIONES'])]); lsSet(MODO + '_rd_les_ini', true); }
   if (MODO === 'supervisor') { const sucios = []; for (const r of RECS.values()) { try { if (limpiarSugeridos(r)) sucios.push(r); } catch(e){} } if (sucios.length) await dbPut(sucios); }
   (await capasDbGet()).forEach(c => { CAPAS[c.id] = c; }); renderCapasSetup(); renderCfg(); await accionesCargar();
   // los paneles de filtros e "Ir a" se cierran solos al bajar por el análisis
