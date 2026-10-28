@@ -440,7 +440,8 @@ const FRANJAS = ['00-04 hs','04-08 hs','08-12 hs','12-16 hs','16-20 hs','20-24 h
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const stripChar = c => { const x = c.normalize('NFD').replace(/[̀-ͯ]/g,''); return x.length === 1 ? x : c; };
-const norm = s => String(s ?? '').split('').map(stripChar).join('').toLowerCase();
+const _normC = new Map();
+const norm = s => { s = String(s ?? ''); if (s.length < 60) { const c = _normC.get(s); if (c !== undefined) return c; } const v = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); if (s.length < 60) { if (_normC.size > 50000) _normC.clear(); _normC.set(s, v); } return v; };
 const normP = s => { const u = norm(s).toUpperCase().replace(/\s+/g,' ').trim(); return ALIAS[u] || u; };
 const pad = n => String(n).padStart(2,'0');
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
@@ -540,6 +541,22 @@ function textoLimpio(r){
          .replace(/\br\.?\s?o\.?\s?\d[\d.]*/g,' ').replace(/grupo de prevencion motorizada|\bgpm\b|motorizad\w+/g,' ').replace(/automotores marca.*$/,' ');
   return r._t;
 }
+const noEsDelito = r => { const t = textoLimpio(r); const m = t.match(/(averiguacion de paradero|paradero|fuga del hogar|se retir\w+ del hogar|fallec\w+|deceso|cadaver|muerte|suicid\w+|incendio|accidente|danos? (en|a|al)|perdida de documentacion|extravi\w+)/); return m ? m[1] : ''; };
+// carátulas que no dicen qué pasó (averiguación de ilícito, hallazgo): se sugiere el delito leyendo el relato
+function delitoDelRelato(r){
+  if (!r.relato) return null;
+  const t = textoLimpio(r), sus = /(sustraj\w*|sustray\w*|sustrae\w*|sustraccion|faltante|le robaron|robaron|se llevaron|llevandose|se apoderaron|apoderandose|arrebat\w+|le quitaron|despoj\w+|hurt\w+)/.test(t);
+  const viol = /(arma de fuego|arma blanca|cuchillo|pistola|revolver|amenaz\w+ con|golpe\w+|golpiz|forceje\w+|empuj\w+|intimid\w+|a punta de|motochorr\w+|lo abordan|la abordan|lo interceptan|la interceptan|reducid[oa] por)/.test(t);
+  const why = 'el relato (la carátula no dice qué pasó)';
+  if (/(venta de (estupefacientes|drogas?|sustancias)|vende\w* (droga|estupefacientes|marihuana|cocaina|paco)|bunker|punto de venta|transa\b)/.test(t)) return { v:'NARCOMENUDEO', why };
+  if (/(herid\w+ (de|por) arma de fuego|impacto de bala|disparos? de arma|detonaciones|balacera|balazo)/.test(t) && !sus) return { v:'ARMAS', why };
+  if (r.cal0?.veh?.some(x => /^sustra/.test(x.vinculo)) || /(sustraj\w*|robaron|se llevaron|faltante)[^.;]{0,80}\b(su |el |la )?(automovil|auto|vehiculo|camioneta|rodado|motocicleta|moto)\b/.test(t)) return { v:'AUTOMOTOR', why };
+  if (/(transferi\w+|estaf\w+|enga[nñ]\w+|haciendose pasar|cuento del tio|mercado libre|marketplace|homebanking|token|cuenta bancaria)/.test(t) && !viol) return { v:'ESTAFA', why };
+  if (sus && viol) return { v:'ROBO', why };
+  if (sus) return { v:'HURTO', why };
+  if (/(amenaz\w+|golpe\w+|lesion\w+|agred\w+|pelea)/.test(t)) return { v:'LESIONES', why };
+  return null;
+}
 const primero = (t, reglas) => { for (const [rx, v] of reglas){ const m = t.match(rx); if (m) return { v, why: '«' + m[0].trim().slice(0,40) + '»' }; } return null; };
 function sugKeyword(r, k, d, m){
   const t = textoLimpio(r);
@@ -550,6 +567,7 @@ function sugKeyword(r, k, d, m){
       [/\b(colectivo|interno \d|remis|taxi|uber|didi|cabify|chofer)\b/, 'Transporte y choferes'],
       [/(rompe\w*|rotura de|estalla\w*) (el |la |los )?(vidrio|ventanilla|luneta)/, 'Rompevidrios'],
       [/\b(comercio|local comercial|kiosco|almacen|supermercado|autoservicio|verduleria|carniceria|farmacia|panaderia|despensa)\b/, 'Asalto a comercio'],
+      [/((al regresar|al retornar|al volver|regres\w+|al llegar)[^.;]{0,60}(domicilio|vivienda|casa|morada|finca)[^.;]{0,120}(forzad|violentad|rot[ao]|faltante|desorden|abiert)|encontr\w+ (la |el )?(puerta|reja|ventana|porton|candado) (de (su|la) (casa|vivienda|domicilio) )?(forzad|violentad|rot|abiert)|no se encontraba(n)? (nadie|en (el|su) (domicilio|vivienda|casa))|sin moradores|ausencia de (sus )?moradores|vivienda (sola|deshabitada))/, 'Escruche'],
       [/\b(ingres\w+|irrump\w+|entraron) (a|al|en) (su |la |el )?(domicilio|vivienda|finca|casa|morada)/, 'Asalto en vivienda'],
       [/\b(motochorr\w*|motocicleta|motovehiculo|moto)\b/, 'Motochorro'], [/\b(transitaba|caminaba|a pie|en la parada|via publica)\b/, 'Vía pública a pie']]);
     if (d === 'HURTO') return primero(t, [[/\b(cables?|cobre|medidor\w*|luminaria)\b/, 'Cables y medidores'], [/\bbicicleta\b/, 'Bicicleta'],
@@ -576,7 +594,9 @@ function sugKeyword(r, k, d, m){
   if (k === 'amenor') { for (const o of t.split(/[;]|\.\s/)) if (/(sujeto|masculino|individuo|autor|aprehen|detenid|imputad|femenina|joven)/.test(o) && /\b(menor(es)? de edad|de 1[0-7] anos|\b1[0-7] anos de edad)/.test(o) && !/(victima|denunciante|damnificad|su hij[oa])/.test(o)) return { v:'Sí', why:'«' + o.trim().slice(0, 45) + '»' }; return null; }
   if (k === 'naut') { const mm = t.match(/\b(un|una|dos|tres|cuatro|cinco|seis|\d)\s+(sujetos?|masculinos?|individuos?|femeninas?|personas de sexo|malvivientes|delincuentes|jovenes|hombres|nn masculinos|desconocidos)\b/);
     if (mm) { const x = NUMS[mm[1]] || parseInt(mm[1]); return { v: x >= 3 ? '3 o más' : String(x), why: '«' + mm[0] + '»' }; } return null; }
-  if (k === 'obj') return primero(t, [[/\b(celular|celulares|telefono|iphone)\b/, 'Celular'], [/\b(dinero|pesos|dolares|recaudacion|efectivo)\b/, 'Dinero']]);
+  if (k === 'obj') { const V = '(sustraj\\w*|sustrae\\w*|sustray\\w*|sustraccion|faltante|llevaron|llevandose|se llevo|se lleva|robaron|robo de|le roba\\w*|arrebat\\w*|apoder\\w+|le quit\\w+|le sac\\w+|despoj\\w+|exigi\\w+|entreg\\w+|perdida de)';
+    return primero(t, [[new RegExp(V + '[^.;]{0,160}\\b(celular|celulares|telefono (movil|celular)|telefono|iphone|samsung|motorola|xiaomi)\\b'), 'Celular'], [/\b(celular|telefono (movil|celular)|iphone)\b[^.;]{0,40}\b(sustraid|robad|faltante)/, 'Celular'],
+      [new RegExp(V + '[^.;]{0,160}\\b(dinero|pesos|dolares|recaudacion|efectivo|billetera)\\b'), 'Dinero'], [new RegExp(V), 'Otro']]); }
   if (k === 'ingreso') return primero(t, [[/entradera|al (ingresar|salir|abrir el porton)/, 'Al entrar o salir'], [/\b(reja|ventana|barrote)\b/, 'Reja o ventana'], [/(forz\w+|violent\w+|barreta) .{0,30}puerta|puerta .{0,30}(forz|violent)/, 'Forzaron puerta'], [/(se hicieron pasar|haciendose pasar|enga[nñ])/, 'Engaño']]);
   if (k === 'tveh') return primero(t, [[/\b(motocicleta|motovehiculo|moto)\b/, 'Moto'], [/\b(camioneta|pick ?up|suv|utilitario|furgon)\b/, 'Camioneta'], [/\bcamion\b/, 'Camión'], [/\b(automovil|auto|vehiculo|rodado)\b/, 'Auto']]);
   if (k === 'vsexo' || k === 'vedad') {
@@ -602,7 +622,7 @@ function sugKeyword(r, k, d, m){
 function sug(r, k){
   r._s = r._s || {};
   const iaS = (v) => v ? { v, why:'la lectura de IA', ia:true } : null;
-  if (!('__d' in r._s)) r._s.__d = iaS(r.ia?.delito) || (r.cal0.cat && r.cal0.cat !== 'REVISAR' ? { v:r.cal0.cat, why:r.cal0.why } : null);
+  if (!('__d' in r._s)) r._s.__d = iaS(r.ia?.delito) || (r.cal0.cat && r.cal0.cat !== 'REVISAR' ? { v:r.cal0.cat, why:r.cal0.why } : null) || delitoDelRelato(r);
   if (k === 'delito' || k === '__d') return r._s.__d;
   const d = r.f.delito || (r._s.__d || {}).v || '', m = r.f.modal || '';
   const ck = k + '|' + d + '|' + m;
@@ -671,13 +691,22 @@ function comisariasDe(partido){
   const ord = c => { const m = norm(c).match(/(\d+)\s*(ra|da|ta|ma|va|na|er|era)?\b/); return (norm(c).replace(/\d+.*$/,'')) + String(m ? +m[1] : 0).padStart(3,'0') + c; };
   return [...(_comis[partido] || [])].sort((a,b) => ord(a).localeCompare(ord(b)));
 }
+// índice por cuadrícula (≈1 km) de las denuncias tomadas en comisarías territoriales, para no recorrer todos los hechos cada vez
+let _cidx = null;
+function idxComis(){
+  if (_cidx && _cidx.n === RECS.size && _cidx.c === _comis) return _cidx;
+  const g = {};
+  for (const x of RECS.values()) { if (x.chk !== 'OK' || x.alertCoord || x.lat0 == null) continue; const k = normP(x.partido) + '|' + Math.floor(x.lat0 / 0.01) + ':' + Math.floor(x.lon0 / 0.01); (g[k] ||= []).push({ id: x.id, a: x.lat0, o: x.lon0, dep: x.dep, loc: norm(x.localidad) }); }
+  return (_cidx = { g, n: RECS.size, c: _comis });
+}
 function comisariaCercana(r){
   const ll = latlon(r) || (r.chk === 'OK' ? [r.lat0, r.lon0] : null); if (!ll) return null;
-  const lista = new Set(comisariasDe(r.partido)); const votos = {}; let best = null, bd = 9;
-  for (const x of RECS.values()) {
-    if (x.id === r.id || x.partido !== r.partido || !lista.has(x.dep) || x.chk !== 'OK' || x.alertCoord) continue;
-    const d = km(ll[0], ll[1], x.lat0, x.lon0);
-    if (d <= 0.8) votos[x.dep] = (votos[x.dep] || 0) + (1 / (0.1 + d)) * (norm(x.localidad) === norm(r.localidad) ? 3 : 1);
+  const lista = new Set(comisariasDe(r.partido)), I = idxComis(), P = normP(r.partido), loc = norm(r.localidad), a0 = Math.floor(ll[0] / 0.01), o0 = Math.floor(ll[1] / 0.01);
+  const votos = {}; let best = null, bd = 9;
+  for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) for (const x of I.g[P + '|' + (a0 + i) + ':' + (o0 + j)] || []) {
+    if (x.id === r.id || !lista.has(x.dep)) continue;
+    const d = km(ll[0], ll[1], x.a, x.o);
+    if (d <= 0.8) votos[x.dep] = (votos[x.dep] || 0) + (1 / (0.1 + d)) * (x.loc === loc ? 3 : 1);
     if (d < bd) { bd = d; best = x.dep; }
   }
   const top = Object.entries(votos).sort((a,b) => b[1]-a[1])[0];
@@ -729,7 +758,7 @@ let sinceExport = lsGet(MODO + '_rd_since', 0);
 let map = null, mk = null;
 let SERIES_EST = lsGet(MODO + '_rd_series', {});
 
-const mios = () => { const ps = new Set((OP?.partidos||[]).map(normP)); return [...RECS.values()].filter(r => ps.has(normP(r.partido)) && !(MODO === 'operadora' && !r.f.delito && !r.f.tveh && (r.f.estado || 'Pendiente') === 'Pendiente' && catR(r) === 'fuera')); };
+const mios = () => { const ps = new Set((OP?.partidos||[]).map(normP)); return [...RECS.values()].filter(r => ps.has(normP(r.partido)) && !(MODO === 'operadora' && !r.f.delito && !r.f.tveh && (r.f.estado || 'Pendiente') === 'Pendiente' && r.cal0?.cat && r.cal0.cat !== 'REVISAR' && catR(r) === 'fuera')); };
 const fechaFinal = r => r.f.fecha1 || r.fecha;
 const horaFinal = r => r.f.hora1 || r.hora;
 const diaDe = r => { const f = fechaFinal(r); return f ? DIAS[new Date(f+'T12:00:00').getDay()] : ''; };
@@ -1137,7 +1166,7 @@ function renderForm(){
   const domsRel = v.veh ? dominiosEn(r.relato).filter(x => x !== normDom(val(r,'dom'))) : [];
   const ds = sug(r,'delito');
   $('#form').innerHTML = `<div class="fbody">${mismoHechoHTML(r)}
-    <div class="frow"><label>Delito <em>*</em></label><div>${chips(r, 'delito', DELITOS.filter(x => catDe(x, '') !== 'fuera' || val(r,'delito') === x || (x === 'AUTOMOTOR' && catDe('MOTOS', '') !== 'fuera')), true)}${(() => { const no = DELITOS.filter(x => catDe(x, '') === 'fuera').map(x => x === 'AUTOMOTOR' && catDe('MOTOS', '') !== 'fuera' ? 'robo de autos y camionetas (las motos sí se cargan, como automotor)' : x.toLowerCase()); return no.length ? `<div class="hint">No se cargan: ${no.join(', ')}. Si el hecho es de esos, tocá “Descartar”.</div>` : ''; })()}${!r.f.delito && ds ? `<div class="def">Sugerido por ${esc(ds.why)}.</div>` : !ds && !r.f.delito ? '<div class="def" style="color:var(--signal)">Sin sugerencia: leé el relato y elegí, o Descartar.</div>' : ''}</div></div>
+    <div class="frow"><label>Delito <em>*</em></label><div>${chips(r, 'delito', DELITOS.filter(x => catDe(x, '') !== 'fuera' || val(r,'delito') === x || (x === 'AUTOMOTOR' && catDe('MOTOS', '') !== 'fuera')), true)}${(() => { const no = DELITOS.filter(x => catDe(x, '') === 'fuera').map(x => x === 'AUTOMOTOR' && catDe('MOTOS', '') !== 'fuera' ? 'robo de autos y camionetas (las motos sí se cargan, como automotor)' : x.toLowerCase()); return no.length ? `<div class="hint">No se cargan: ${no.join(', ')}. Si el hecho es de esos, tocá “Descartar”.</div>` : ''; })()}${!r.f.delito && ds ? `<div class="def">Sugerido por ${esc(ds.why)}.</div>` : !ds && !r.f.delito ? `<div class="def" style="color:var(--signal)">${noEsDelito(r) ? `Parece que no es un delito para analizar (${noEsDelito(r)}): si es así, tocá “Descartar”.` : 'Sin sugerencia: leé el relato y elegí, o Descartar.'}</div>` : ''}</div></div>
     ${d ? `<div class="frow"><label>Modalidad <em>*</em></label><div>${chips(r, 'modal', mods.map(x => x[0]))}${def ? `<div class="def">${esc(def)}</div>` : ''}</div></div>` : ''}
     <div class="frow"><label>Fecha / hora</label><div><div class="two">
       <input type="date" class="txt${!r.f.fecha1 && necesitaF && sf ? ' sug' : ''}" data-in="fecha1" id="i_fecha1" value="${esc(r.f.fecha1 || (necesitaF && !r.fecha && sf ? sf.v : '') || r.fecha || '')}">
