@@ -366,30 +366,27 @@ let LAST_ROWS = [];
 /* ===================== catálogo ===================== */
 const MOD = {
  'ROBO': [
-  ['Vía pública a pie','Asaltan a una persona en la calle y los autores van a pie.'],
+  ['Vía pública','Asaltan a una persona en la calle, en la parada o al salir del banco. Autores a pie o en auto.'],
   ['Motochorro','Asaltan a una persona en la calle y los autores van en moto.'],
+  ['Conductor u ocupante de vehículo','Asaltan a quien está arriba de su auto, camioneta o moto, o al subir o bajar, sin llevarse el vehículo.'],
   ['Entradera','Abordan a la víctima al entrar o salir de su casa o cochera y la obligan a entrar.'],
-  ['Asalto en vivienda','Entran a una casa con moradores, sin ser entradera.'],
+  ['Asalto en vivienda','Entran a una casa con gente adentro, sin ser al entrar o salir.'],
   ['Escruche','Entran a una casa o local sin personas, forzando puertas, rejas o ventanas.'],
-  ['Asalto a comercio','Comercio abierto, con personal o clientes.'],
-  ['Rompevidrios','Rompen un vehículo para robar del interior o autopartes, sin llevárselo.'],
-  ['Transporte y choferes','En colectivo, tren o parada, o a choferes de colectivo, taxi, remís o aplicación.'],
-  ['Repartidor','Asalto a trabajadores de delivery o reparto.'],
-  ['Salidera','Siguen a la víctima desde un banco, cajero o financiera.'],
-  ['Piratería','Asalto a camiones o vehículos de reparto con carga.'],
-  ['Polichorro','Autores vestidos o identificados como policías.'],
-  ['Viuda negra','Drogan o adormecen a la víctima para robarle.']],
+  ['Comercio','Comercio abierto, con personal o clientes.'],
+  ['Transporte y reparto','En colectivo, tren o taxi, o a choferes, repartidores y camiones de carga.'],
+  ['Vehículo estacionado','Rompen un vehículo estacionado, sin gente, para robar del interior o autopartes.'],
+  ['Otros robos','Polichorro, viuda negra o lo que no encaja en las anteriores.']],
  'AUTOMOTOR': [
   ['Asalto','Le sacan el vehículo al conductor con violencia o intimidación.'],
   ['Levantamiento','El vehículo estaba estacionado y la víctima no estaba.'],
   ['Hallazgo','Aparece un vehículo con pedido de secuestro o abandonado.'],
   ['Desarmadero','Taller o lugar con autopartes o vehículos de origen ilícito.']],
  'HURTO': [
-  ['Descuido / punga','Sin violencia, en la vía pública, en transporte o en un local.'],
-  ['Mechera','Mercadería de un comercio, sin violencia.'],
-  ['Autopartes','Ruedas, patentes u objetos de un vehículo, sin romperlo.'],
+  ['Vía pública','Sin violencia, en la calle, en el transporte o en un lugar público: descuido, punga, bicicleta.'],
+  ['Comercio','Mercadería de un comercio, sin violencia (mechera).'],
+  ['Vehículo estacionado','Ruedas, patentes, autopartes u objetos de un vehículo, sin romperlo.'],
   ['Cables y medidores','Cables, medidores, tapas y bienes públicos.'],
-  ['Bicicleta','Bicicleta sin violencia.']],
+  ['Otros hurtos','En una vivienda, obra o lugar de trabajo, o lo que no encaja en las anteriores.']],
  'ESTAFA': [
   ['Cuento del tío','Falso pariente o falso empleado (banco, ANSES, servicios) que retira dinero o joyas en el domicilio.'],
   ['Compraventa','Encuentro o pago pactado por Marketplace u otra plataforma. Si hubo intimidación, es robo.'],
@@ -431,6 +428,20 @@ const LST = {
   vsexo:['Mujer','Varón','S/D'], vedad:['Menor','Adulto','Adulto mayor','S/D'], asexo:['Varones','Mujeres','Mixto','S/D'], amenor:['No','Sí','S/D'],
 };
 const VIVIENDA = ['Entradera','Asalto en vivienda','Escruche'];
+// modalidades viejas -> nuevas (octubre 2026). Lo ya cargado se convierte solo.
+const MOD_VIEJA = { 'ROBO|Vía pública a pie':['Vía pública','A pie'], 'ROBO|Salidera':['Vía pública'], 'ROBO|Asalto a comercio':['Comercio'],
+  'ROBO|Robo a automovilista':['Conductor u ocupante de vehículo'], 'ROBO|Rompevidrios':['Vehículo estacionado'], 'ROBO|Transporte y choferes':['Transporte y reparto'], 'ROBO|Repartidor':['Transporte y reparto'],
+  'ROBO|Piratería':['Transporte y reparto'], 'ROBO|Polichorro':['Otros robos'], 'ROBO|Viuda negra':['Otros robos'],
+  'HURTO|Descuido / punga':['Vía pública'], 'HURTO|Bicicleta':['Vía pública'], 'HURTO|Mechera':['Comercio'], 'HURTO|Autopartes':['Vehículo estacionado'] };
+const modNueva = (d, m) => (MOD_VIEJA[d + '|' + m] || [m])[0];
+function migrarModal(r){
+  let c = false; const d = r.f.delito || r.cal0?.cat || r.ia?.delito || '';
+  if (r.f.modal) { const x = MOD_VIEJA[d + '|' + r.f.modal] || MOD_VIEJA[(r.f.delito || '') + '|' + r.f.modal]; if (x) { r.f.modal = x[0]; if (x[1] && !r.f.movil) r.f.movil = x[1]; c = true; } }
+  if (r.cal0?.mod && MOD_VIEJA[r.cal0.cat + '|' + r.cal0.mod]) { r.cal0.mod = modNueva(r.cal0.cat, r.cal0.mod); c = true; }
+  // si ya se convirtió a Vía pública con moto, vuelve a Motochorro
+  if (r.f.delito === 'ROBO' && r.f.modal === 'Vía pública' && r.f.movil === 'Moto') { r.f.modal = 'Motochorro'; c = true; }
+  if (c) delete r._s; return c;
+}
 const PRIO = ['HOMICIDIO','AUTOMOTOR','ROBO','ARMAS','ESTAFA','HURTO','NARCOMENUDEO','OTROS GRAVES','LESIONES','REVISAR'];
 const ORDEN_PRIO = {'ROBO':0,'AUTOMOTOR':0,'HOMICIDIO':0,'ARMAS':1,'REVISAR':2,'ESTAFA':3,'HURTO':3,'NARCOMENUDEO':4,'OTROS GRAVES':5,'LESIONES':5};
 const DIAS = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
@@ -561,17 +572,19 @@ const primero = (t, reglas) => { for (const [rx, v] of reglas){ const m = t.matc
 function sugKeyword(r, k, d, m){
   const t = textoLimpio(r);
   if (k === 'modal') {
-    if (d === 'ROBO') return primero(t, [[/entradera/, 'Entradera'], [/escruche/, 'Escruche'], [/salidera|(retir\w+|extra\w+) (dinero|efectivo) (del|de un|de una) (banco|cajero)/, 'Salidera'],
-      [/(uniforme|vestid\w+) (de |como )?polic|identificandose como polic|polichorr/, 'Polichorro'], [/viuda negra|(la|lo) drog\w+|adormec/, 'Viuda negra'],
-      [/\b(repartidor|delivery|rappi|pedidos ya)\b/, 'Repartidor'], [/\b(camion|carga|mercaderia) .{0,40}(asalt|intercept)|pirata/, 'Piratería'],
-      [/\b(colectivo|interno \d|remis|taxi|uber|didi|cabify|chofer)\b/, 'Transporte y choferes'],
-      [/(rompe\w*|rotura de|estalla\w*) (el |la |los )?(vidrio|ventanilla|luneta)/, 'Rompevidrios'],
-      [/\b(comercio|local comercial|kiosco|almacen|supermercado|autoservicio|verduleria|carniceria|farmacia|panaderia|despensa)\b/, 'Asalto a comercio'],
+    if (d === 'ROBO') return primero(t, [[/entradera/, 'Entradera'], [/escruche/, 'Escruche'], [/salidera|(retir\w+|extra\w+) (dinero|efectivo) (del|de un|de una) (banco|cajero)/, 'Vía pública'],
+      [/(uniforme|vestid\w+) (de |como )?polic|identificandose como polic|polichorr/, 'Otros robos'], [/viuda negra|(la|lo) drog\w+|adormec/, 'Otros robos'],
+      [/\b(repartidor|delivery|rappi|pedidos ya)\b/, 'Transporte y reparto'], [/\b(camion|carga|mercaderia) .{0,40}(asalt|intercept)|pirata/, 'Transporte y reparto'],
+      [/\b(colectivo|interno \d|remis|taxi|uber|didi|cabify|chofer)\b/, 'Transporte y reparto'],
+      [/(rompe\w*|rotura de|estalla\w*) (el |la |los )?(vidrio|ventanilla|luneta)/, 'Vehículo estacionado'],
+      [/((se encontraba|estaba|permanecia|aguardaba|esperaba) (a bordo|dentro|en el interior|arriba|sentad[oa]) (de|en) su (auto\w*|vehiculo|camioneta|rodado|coche)|a bordo de su (auto\w*|vehiculo|camioneta|rodado)|(descienden|bajan|bajaron|descendieron) (de|del) (un|otro|un otro) (vehiculo|auto\w*|rodado|camioneta))/, 'Conductor u ocupante de vehículo'],
+      [/\b(comercio|local comercial|kiosco|almacen|supermercado|autoservicio|verduleria|carniceria|farmacia|panaderia|despensa)\b/, 'Comercio'],
       [/((al regresar|al retornar|al volver|regres\w+|al llegar)[^.;]{0,60}(domicilio|vivienda|casa|morada|finca)[^.;]{0,120}(forzad|violentad|rot[ao]|faltante|desorden|abiert)|encontr\w+ (la |el )?(puerta|reja|ventana|porton|candado) (de (su|la) (casa|vivienda|domicilio) )?(forzad|violentad|rot|abiert)|no se encontraba(n)? (nadie|en (el|su) (domicilio|vivienda|casa))|sin moradores|ausencia de (sus )?moradores|vivienda (sola|deshabitada))/, 'Escruche'],
       [/\b(ingres\w+|irrump\w+|entraron) (a|al|en) (su |la |el )?(domicilio|vivienda|finca|casa|morada)/, 'Asalto en vivienda'],
-      [/\b(motochorr\w*|motocicleta|motovehiculo|moto)\b/, 'Motochorro'], [/\b(transitaba|caminaba|a pie|en la parada|via publica)\b/, 'Vía pública a pie']]);
-    if (d === 'HURTO') return primero(t, [[/\b(cables?|cobre|medidor\w*|luminaria)\b/, 'Cables y medidores'], [/\bbicicleta\b/, 'Bicicleta'],
-      [/\b(supermercado|local comercial|comercio|mercaderia|gondola)\b/, 'Mechera'], [/\b(rueda|neumatico|bateria|estereo|patente|espejo)\b/, 'Autopartes'], [/./, 'Descuido / punga']]);
+      [/\b(motochorr\w*|motocicleta|motovehiculo|moto)\b/, 'Motochorro'], [/\b(transitaba|caminaba|a pie|en la parada|via publica|arrebat\w*)\b/, 'Vía pública']]);
+    if (d === 'HURTO') return primero(t, [[/\b(cables?|cobre|medidor\w*|luminaria)\b/, 'Cables y medidores'], [/\bbicicleta\b/, 'Vía pública'],
+      [/\b(supermercado|local comercial|comercio|mercaderia|gondola)\b/, 'Comercio'], [/\b(rueda|neumatico|bateria|estereo|patente|espejo|del interior de(l| su) (auto\w*|vehiculo|camioneta|rodado))\b/, 'Vehículo estacionado'],
+      [/\b(obra en construccion|lugar de trabajo|empleada domestica|(del|en el) interior de (su|la) (casa|vivienda|domicilio|finca)|faltante\w* (en|de) (su|la) (casa|vivienda|domicilio))\b/, 'Otros hurtos'], [/./, 'Vía pública']]);
     if (d === 'ESTAFA') return primero(t, [[/(nieto|hijo|sobrino|familiar|empleado del banco|anses|se hizo pasar|haciendose pasar)/, 'Cuento del tío'],
       [/(marketplace|mercado libre|facebook|publicacion|compra\w* .{0,30}(online|internet))/, 'Compraventa'], [/whatsapp/, 'WhatsApp'], [/./, 'Virtual / informática']]);
     if (d === 'NARCOMENUDEO') return primero(t, [[/delivery|reparto/, 'Delivery'], [/(vende\w*|venta) (en|desde) (la|su) (casa|domicilio|vivienda)|bunker|en la casa/, 'Punto fijo'], [/\b(esquina|plaza|pasillo|en la calle|via publica)\b/, 'Vía pública']]);
@@ -628,7 +641,7 @@ function sug(r, k){
   const ck = k + '|' + d + '|' + m;
   if (ck in r._s) return r._s[ck];
   let s = null; const ia = r.ia || {};
-  if (k === 'modal') s = (ia.modalidad && ia.delito === d ? iaS(ia.modalidad) : null) || (r.cal0.mod && r.cal0.cat === d ? { v:r.cal0.mod, why:r.cal0.why } : null) || sugKeyword(r, 'modal', d, m);
+  if (k === 'modal') s = (ia.modalidad && ia.delito === d ? iaS(modNueva(d, ia.modalidad)) : null) || (r.cal0.mod && r.cal0.cat === d ? { v:r.cal0.mod, why:r.cal0.why } : null) || sugKeyword(r, 'modal', d, m);
   else if (k === 'arma') s = iaS(ia.arma) || (/uso de armas? de fuego/.test(norm(r.cal)) ? { v:'Fuego', why:'la carátula' } : null) || sugKeyword(r, k) || (d === 'ARMAS' ? { v:'Fuego', why:'el delito' } : null);
   else if (k === 'naut') s = iaS(ia.autores) || sugKeyword(r, k);
   else if (k === 'movil') s = iaS(ia.movilidad) || (m === 'Motochorro' ? { v:'Moto', why:'la modalidad' } : null) || sugKeyword(r, k);
@@ -1013,7 +1026,7 @@ async function importarAvance(files){
         r.f[kk] = v == null ? '' : String(v);
       }
       if (r.fecha !== toISODate(x['Fecha hecho']) && x['Fecha hecho']) r.f.fecha1 = toISODate(x['Fecha hecho']);
-      limpiarSugeridos(r);
+      migrarModal(r); limpiarSugeridos(r);
       ok++; lote.push(r);
     }
   }
@@ -1396,7 +1409,7 @@ function analizar(base){
     });
   };
   grupo(r => val(r,'delito') === 'ROBO' && VIVIENDA.includes(val(r,'modal')), 'Vivienda', 1.5, 21, 4);
-  grupo(r => val(r,'delito') === 'ROBO' && ['Motochorro','Vía pública a pie','Asalto a comercio'].includes(val(r,'modal')), 'Robo', 1.0, 14, 5);
+  grupo(r => val(r,'delito') === 'ROBO' && ['Vía pública','Motochorro','Comercio','Conductor u ocupante de vehículo'].includes(val(r,'modal')), 'Robo', 1.0, 14, 5);
   grupo(r => val(r,'delito') === 'AUTOMOTOR' && val(r,'modal') === 'Asalto', 'Automotor', 1.5, 14, 5);
   grupo(r => val(r,'delito') === 'AUTOMOTOR' && val(r,'modal') === 'Levantamiento' && val(r,'vehiculo'), 'Automotor', 1.2, 21, 0, 'modelo');
   series.sort((a,b) => b.items.length - a.items.length);
@@ -2525,7 +2538,7 @@ function accionesHTML(RS){
 /* ---------- 5) lugares y víctimas que se repiten (robos y hurtos) ---------- */
 function reiteradosRobo(base){
   const H = base.filter(r => esAnal(r));
-  const lug = {}; H.filter(r => ['Entradera','Asalto en vivienda','Escruche','Asalto a comercio','Mechera'].includes(val(r,'modal'))).forEach(r => { const k = dirKey(r); if (k) (lug[k] ||= []).push(r); });
+  const lug = {}; H.filter(r => ['Entradera','Asalto en vivienda','Escruche','Comercio'].includes(val(r,'modal'))).forEach(r => { const k = dirKey(r); if (k) (lug[k] ||= []).push(r); });
   const lugares = Object.values(lug).filter(g => g.length >= 2).sort((a, b) => b.length - a.length);
   const vic = {}; H.forEach(r => { const d = dnisDe(r)[0]; if (d) (vic[d] ||= []).push(r); });
   const victimas = Object.entries(vic).filter(([, g]) => g.length >= 2).sort((a, b) => b[1].length - a[1].length);
@@ -3043,7 +3056,7 @@ window.addEventListener('beforeunload', () => { guardarTiempo(); const r = RECS.
 (async function init(){
   document.body.classList.add(MODO === 'operadora' ? 'op' : 'sup');
   await openDB();
-  (await dbAll()).forEach(r => { if (!r.cal0) r.cal0 = { cat:null, mod:'', why:'', veh:[] }; RECS.set(r.id, r); });
+  { const mig = []; (await dbAll()).forEach(r => { if (!r.cal0) r.cal0 = { cat:null, mod:'', why:'', veh:[] }; if (migrarModal(r)) mig.push(r); RECS.set(r.id, r); }); if (mig.length) await dbPut(mig); }
   if (MODO === 'supervisor') await unirHuerfanos();
   if (MODO === 'supervisor') { const sucios = []; for (const r of RECS.values()) { try { if (limpiarSugeridos(r)) sucios.push(r); } catch(e){} } if (sucios.length) await dbPut(sucios); }
   (await capasDbGet()).forEach(c => { CAPAS[c.id] = c; }); renderCapasSetup(); renderCfg(); await accionesCargar();
