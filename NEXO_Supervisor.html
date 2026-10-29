@@ -783,7 +783,14 @@ function latlon(r){
   if (r.chk === 'OK' || r.f.coord === 'Confirmada' || r.f.coord === 'OK') return r.lat0 != null && r.chk !== 'INVÁLIDA' && r.chk !== 'SIN COORDENADA' ? [r.lat0, r.lon0] : null;
   return null;
 }
+// corrección de ubicación hecha por el supervisor: manda sobre la de la operadora
+function aplicarUbSup(r){
+  if (!r.f.supLL) return false;
+  if (!('coordOp' in r.f) && !(r.f.lat1 === r.f.supLL[0] && r.f.lon1 === r.f.supLL[1])) { r.f.coordOp = r.f.coord || ''; if (r.f.lat1 != null) { r.f.latOp = r.f.lat1; r.f.lonOp = r.f.lon1; } }
+  r.f.coord = 'Corregida'; r.f.lat1 = r.f.supLL[0]; r.f.lon1 = r.f.supLL[1]; delete r._s; return true;
+}
 function coordEstado(r){
+  if (r.f.supLL) return ['CORREGIDA POR EL SUPERVISOR','ok'];
   if (r.f.coord === 'Corregida') return ['CORREGIDA','ok'];
   if (r.f.coord === 'Sin dato') return ['SIN DATO','warn'];
   if (r.f.coord === 'Confirmada') return ['CONFIRMADA','ok'];
@@ -1022,11 +1029,11 @@ async function importarAvance(files){
         if (!k || !k.startsWith('f.') || !(h in x)) continue;
         const kk = k.slice(2); let v = x[h];
         if (kk === 'mins') { if (num(v)) r.f.secs = num(v) * 60; continue; }
-        if (kk === 'coord') { v = /CORREGIDA/.test(v) ? 'Corregida' : /SIN DATO/.test(v) ? 'Sin dato' : 'Confirmada'; if (v === 'Corregida') { r.f.lat1 = num(x.LAT); r.f.lon1 = num(x.LON); } }
+        if (kk === 'coord') { v = /CORREGIDA/.test(v) ? 'Corregida' : /SIN DATO/.test(v) ? 'Sin dato' : 'Confirmada'; if (v === 'Corregida') { r.f.lat1 = num(x.LAT); r.f.lon1 = num(x.LON); if (/SUPERVISOR/.test(x[h]) && MODO === 'supervisor' && r.f.lat1 != null) r.f.supLL = [r.f.lat1, r.f.lon1]; } }
         r.f[kk] = v == null ? '' : String(v);
       }
       if (r.fecha !== toISODate(x['Fecha hecho']) && x['Fecha hecho']) r.f.fecha1 = toISODate(x['Fecha hecho']);
-      migrarModal(r); limpiarSugeridos(r);
+      migrarModal(r); limpiarSugeridos(r); if (r.f.supLL) { delete r.f.coordOp; delete r.f.latOp; delete r.f.lonOp; const op = { c: r.f.coord, la: r.f.lat1, lo: r.f.lon1 }; r.f.coordOp = op.c; if (op.la != null) { r.f.latOp = op.la; r.f.lonOp = op.lo; } r.f.coord = 'Corregida'; r.f.lat1 = r.f.supLL[0]; r.f.lon1 = r.f.supLL[1]; delete r._s; }
       ok++; lote.push(r);
     }
   }
@@ -2699,7 +2706,10 @@ function verDenuncia(id){
   $('#modalBody').innerHTML = `<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap">
       <div><h2 style="margin:0">N° ${r.n} · ${esc(val(r,'delito') || 'Sin clasificar')} · ${esc(val(r,'modal'))}</h2>
       <p class="hint" style="margin:3px 0 0">IPP ${esc(r.ipp)} · ID ${esc(r.id)} · <span class="flag ${est === 'Completo' ? 'ok' : est === 'Consultar' ? 'warn' : est === 'Descartar' ? 'bad' : 'info'}">${esc(est.toUpperCase())}</span>${r.f.oper ? ' · cargado por ' + esc(r.f.oper) : ''}${r.f.ts ? ' el ' + esc(r.f.ts) : ''}</p></div>
-      <div class="seg">${ll && amap ? `<button class="btn sm" id="btnVerMapa">Ver en el mapa</button>` : ''}<button class="btn primary sm" onclick="document.getElementById('modal').hidden=true">Cerrar</button></div></div>
+      <div class="seg">${MODO === 'supervisor' ? `<button class="btn sm" id="btnCorrUb">Corregir ubicación</button>` : ''}${ll && amap ? `<button class="btn sm" id="btnVerMapa">Ver en el mapa</button>` : ''}<button class="btn primary sm" onclick="document.getElementById('modal').hidden=true">Cerrar</button></div></div>
+    ${MODO === 'supervisor' ? `<div id="corrUb" class="ia" style="margin-top:10px" hidden><b class="lab">Corregir ubicación</b>Pegá las coordenadas correctas (como las copiás de Google Maps, por ejemplo <span class="mono">-34.64271, -58.57764</span>) o el enlace de Google Maps.
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input class="txt mono" id="corrUbIn" style="flex:1;min-width:220px" placeholder="-34.64271, -58.57764"><button class="btn primary sm" id="corrUbOk">Guardar</button>${r.f.supLL ? `<button class="btn sm" id="corrUbDel">Volver a la de la operadora</button>` : ''}</div>
+      <p class="hint" id="corrUbMsg" style="margin:4px 0 0">Queda guardada en esta PC y manda sobre la de la operadora aunque importes de nuevo su avance. Igual conviene que ella también la corrija.</p></div>` : ''}
     ${r._rep && RECS.get(r._rep) ? `<div class="ia" style="margin-top:10px"><b class="lab">Hecho repetido</b>Es el mismo hecho que el <button class="nlink" onclick="verDenuncia('${esc(r._rep)}')">N° ${RECS.get(r._rep).n}</button>, que es el que se cuenta en el análisis.</div>` : ''}
     ${r.f.estado === 'Consultar' ? `<div class="ia" style="border-color:var(--signal);background:var(--signal-soft);margin-top:10px"><b class="lab" style="color:var(--signal)">Consulta de ${esc(r.f.oper || 'la operadora')}</b>${esc(r.f.obs || '')}</div>` : ''}
     <div class="den" style="margin-top:12px">
@@ -2723,6 +2733,15 @@ function verDenuncia(id){
     </div>`;
   $('#modal').hidden = false; $('#modalBody').scrollTop = 0;
   const bm = $('#btnVerMapa'); if (bm) bm.onclick = () => { $('#modal').hidden = true; amap.setView(ll, 17); };
+  const bc = $('#btnCorrUb'); if (bc) bc.onclick = () => { const d = $('#corrUb'); d.hidden = !d.hidden; if (!d.hidden) $('#corrUbIn').focus(); };
+  const bo = $('#corrUbOk'); if (bo) bo.onclick = async () => {
+    const t = String($('#corrUbIn').value || '').trim(), m = t.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || t.match(/(-?\d{1,2}[.,]\d+)\s*[,;\s]\s*(-?\d{1,2}[.,]\d+)/);
+    const la = m ? num(m[1]) : null, lo = m ? num(m[2]) : null, ck = coordCheck(la, lo, r.partido);
+    if (ck === 'SIN COORDENADA' || ck === 'INVÁLIDA') { $('#corrUbMsg').innerHTML = '<b style="color:var(--bad)">No reconozco esas coordenadas.</b> Copialas de Google Maps: clic derecho sobre el lugar y clic en los números.'; return; }
+    r.f.supLL = [+la.toFixed(6), +lo.toFixed(6)]; aplicarUbSup(r); await dbPut([r]);
+    toast(ck === 'OK' ? 'Ubicación corregida.' : 'Ubicación corregida. Ojo: queda fuera de ' + r.partido + '.', 4000);
+    if ($('#aside')?.innerHTML) reAnalisis(); verDenuncia(id); };
+  const bd = $('#corrUbDel'); if (bd) bd.onclick = async () => { delete r.f.supLL; r.f.coord = r.f.coordOp || r.f.coord; if (r.f.latOp != null) { r.f.lat1 = r.f.latOp; r.f.lon1 = r.f.lonOp; } else { delete r.f.lat1; delete r.f.lon1; } delete r.f.coordOp; delete r.f.latOp; delete r.f.lonOp; await dbPut([r]); toast('Volvió la ubicación de la operadora.'); if ($('#aside')?.innerHTML) reAnalisis(); verDenuncia(id); };
 }
 function verConsulta(id){ return verDenuncia(id); }
 function verConsultaVieja(id){
