@@ -2036,6 +2036,8 @@ function contextoTexto(r){
 }
 
 /* desde qué fecha los datos están completos: la primera fecha de carga, salvo que el crudo traiga como "fecha de carga" el día en que se bajó (entonces se usan las fechas de los hechos) */
+// último día cubierto por los crudos cargados (los hechos que vienen solo en avances, sin denuncia, no cuentan)
+function finDatos(base){ let m = ''; for (const r of base) if (r.relato && r.fcarga && r.fcarga > m) m = r.fcarga; return m; }
 function inicioDatos(base){
   const fs = base.map(fechaFinal).filter(Boolean).sort(), cs = base.map(r => r.fcarga).filter(Boolean).sort();
   let d = fs[Math.floor(fs.length * 0.1)] || '';
@@ -2241,9 +2243,11 @@ function aprehendidosHTML(base){
 function movimientoDelito(base){
   const pts = base.filter(r => latlon(r) && fechaFinal(r) && esAnal(r) && val(r,'modal') !== 'Hallazgo' && (r.fchk === 'OK' || r.fchk === 'SIN HORA' || r.f.fecha1))
     .map(r => { const ll = latlon(r); return { r, ll: [+ll[0], +ll[1]], f: fechaFinal(r) }; });
+  const fin = finDatos(base), fuera = fin ? pts.filter(p => p.f > fin).length : 0;
+  if (fin) for (let i = pts.length - 1; i >= 0; i--) if (pts[i].f > fin) pts.splice(i, 1);
   if (pts.length < 30) return null;
   const fs = pts.map(p => p.f).sort(), d1 = fs.at(-1), d0 = [inicioDatos(base), fs[0]].sort().at(-1), nDias = diasEntre(d1, d0) + 1;
-  const out = { d1, nDias };
+  const out = { d1, nDias, fuera, fin };
   // 1) zonas que se encienden / se apagan: última semana contra el promedio semanal anterior (celdas de ~400 m)
   if (nDias >= 14) {
     const ini = sumaDias(d1, -6), semAnt = Math.max(1, (diasEntre(ini, d0)) / 7), C = 0.004, cel = ll => Math.floor(ll[0] / C) + ':' + Math.floor(ll[1] / C);
@@ -2285,6 +2289,7 @@ function movimientoHTML(M){
   h += `<p class="hint" style="margin:0 0 4px"><b>Zonas que se encendieron</b> en la última semana (${M.ini ? `${fmtF(M.ini)} al ${fmtF(M.d1)}` : '—'}), contra su promedio de las semanas anteriores.</p>`;
   h += M.enc ? (M.enc.length ? `<table class="t"><tr><th>Zona</th><th>Última semana</th><th>Antes (por semana)</th><th>Qué pasa</th></tr>${M.enc.map(z => `<tr class="cl" data-goto="${z.ll[0]},${z.ll[1]}"><td>${esc(z.calle)}<br><span class="hint">${esc(z.loc)}</span></td><td><b>${z.u}</b></td><td>${z.a.toFixed(1)}</td><td>${esc(z.mods)}</td></tr>`).join('')}</table>` : '<p class="hint">Ninguna zona se disparó esta semana.</p>')
     : `<p class="hint">Se activa con 2 semanas de datos (hay ${M.nDias} días).</p>`;
+  if (M.fuera) h += `<p class="hint">No se cuentan ${M.fuera} hechos posteriores al ${fmtF(M.fin)} que vinieron en avances pero cuyo crudo todavía no cargaste: cuando cargues esa semana, entran solos.</p>`;
   if (M.rc) {
     const r = M.rc, tasa = r.n ? r.rep / r.n : 0;
     h += `<p class="hint" style="margin:10px 0 4px"><b>Repetición cercana (robos a viviendas)</b>: después de una entradera, escruche o asalto en vivienda, ¿hay otro a menos de 2 cuadras en los 14 días siguientes?</p>
@@ -2398,8 +2403,8 @@ function backupHTML(){
 let LAST_BASE = [], LAST_V = null, ACCIONES = null;
 const FR_TXT = ['0 a 4 hs','4 a 8 hs','8 a 12 hs','12 a 16 hs','16 a 20 hs','20 a 24 hs'];
 const topDe = arr => { const o = {}; arr.forEach(x => { if (x) o[x] = (o[x] || 0) + 1; }); return Object.entries(o).sort((a, b) => b[1] - a[1]); };
-const ptsAnal = base => base.filter(r => esAnal(r) && latlon(r) && fechaFinal(r) && horaFinal(r) && (r.fchk === 'OK' || r.f.fecha1 || r.f.hora1))
-  .map(r => { const ll = latlon(r), f = fechaFinal(r); return { r, ll: [+ll[0], +ll[1]], f, w: new Date(f + 'T12:00:00').getDay(), fr: Math.floor(parseInt(horaFinal(r)) / 4) }; });
+const ptsAnal = base => { const fin = finDatos(base); return base.filter(r => esAnal(r) && latlon(r) && fechaFinal(r) && horaFinal(r) && (r.fchk === 'OK' || r.f.fecha1 || r.f.hora1) && (!fin || fechaFinal(r) <= fin))
+  .map(r => { const ll = latlon(r), f = fechaFinal(r); return { r, ll: [+ll[0], +ll[1]], f, w: new Date(f + 'T12:00:00').getDay(), fr: Math.floor(parseInt(horaFinal(r)) / 4) }; }); };
 
 /* ---------- 1) ventanas de prevención ---------- */
 function ventanasPrevencion(base){
@@ -2573,7 +2578,7 @@ function mapaParteSVG(anal, marc){
 function generarParte(tipo){
   const base = LAST_BASE, fp = $('#aPar')?.value || '', fc = $('#aCom')?.value || '';
   if (!base.length) return toast('Abrí el análisis primero.');
-  const anal = base.filter(esAnal), fs = anal.map(fechaFinal).filter(Boolean).sort(), d1 = fs.at(-1), ini = sumaDias(d1, -6), d0 = inicioDatos(base);
+  const fin0 = finDatos(base), anal = base.filter(r => esAnal(r) && (!fin0 || !fechaFinal(r) || fechaFinal(r) <= fin0)), fs = anal.map(fechaFinal).filter(Boolean).sort(), d1 = fs.at(-1), ini = sumaDias(d1, -6), d0 = inicioDatos(base);
   const ult = anal.filter(r => fechaFinal(r) >= ini), semAnt = Math.max(1, diasEntre(ini, d0) / 7), prev = anal.filter(r => fechaFinal(r) >= d0 && fechaFinal(r) < ini).length / semAnt;
   const porDel = d => ({ u: ult.filter(r => val(r,'delito') === d).length, a: anal.filter(r => val(r,'delito') === d && fechaFinal(r) >= d0 && fechaFinal(r) < ini).length / semAnt });
   const varTxt = (u, a) => diasEntre(ini, d0) >= 7 && a ? `${u >= a ? '+' : ''}${Math.round((u / a - 1) * 100)}% vs. promedio` : '';
