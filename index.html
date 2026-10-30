@@ -2454,13 +2454,37 @@ function sugOrigen(r){
   }
   return null;
 }
+// localidades de origen que no están entre los hechos de esta PC: se buscan por internet (una vez) y quedan guardadas
+const SIN_DOM = /^(no (especifica|aporta|sabe|recuerda|posee|tiene|consta|surge)|sin (dato|domicilio|especificar)|s\/?d|desconoce|desconocido|ignorado|nn|-+)\b/;
+let GEO_ORIG = null, geoOrigCorriendo = false;
+const geoOrig = () => GEO_ORIG ||= lsGet(MODO + '_rd_geoOrig', {});
+const origKey = s => lugarN(s);
+async function ubicarOrigenes(lista){
+  if (geoOrigCorriendo) return; geoOrigCorriendo = true; const G = geoOrig(); let hechos = 0;
+  for (const o of lista.slice(0, 40)) {
+    const k = origKey(o); if (k in G) continue;
+    const t = String(o).trim(), caba = /capital federal|\bcaba\b|ciudad autonoma|ciudad de buenos aires/i.test(norm(t));
+    const pruebas = caba ? ['Ciudad Autónoma de Buenos Aires, Argentina'] : [t + ', Buenos Aires, Argentina'];
+    if (!caba) { const m = norm(t).split(/\s+en\s+/); if (m.length > 1) pruebas.push(m.at(-1) + ', Buenos Aires, Argentina'); if (t.includes(',')) pruebas.push(t.split(',')[0] + ', Buenos Aires, Argentina'); }
+    let res = 0, cortado = false;
+    for (const q of pruebas) {
+      try { const js = await (await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ar&q=' + encodeURIComponent(q))).json();
+        await new Promise(r => setTimeout(r, 1100));
+        if (js.length) { const la = +js[0].lat, lo = +js[0].lon; if (la > -36 && la < -33.5 && lo > -60 && lo < -57) { res = [+la.toFixed(5), +lo.toFixed(5)]; hechos++; break; } }
+      } catch(e) { cortado = true; break; }
+    }
+    if (cortado) break; G[k] = res;
+    lsSet(MODO + '_rd_geoOrig', G);
+  }
+  geoOrigCorriendo = false; if (FOCO && FOCO.orig) reAnalisis();
+}
 function origenAprehendidos(base){
-  const H = base.filter(r => esAnal(r) && conAprh(r) && val(r,'aorig'));
+  const H = base.filter(r => esAnal(r) && conAprh(r) && val(r,'aorig') && !SIN_DOM.test(norm(val(r,'aorig')).trim()));
   const conA = base.filter(r => esAnal(r) && conAprh(r)).length;
   if (!H.length) return { n: 0, conA };
   // centro de cada localidad, a partir de los hechos ubicados de esta computadora
   const cen = {}; [...RECS.values()].forEach(r => { const ll = latlon(r); if (!ll || !r.localidad) return; const k = lugarN(r.localidad), c = (cen[k] ||= [0, 0, 0]); c[0] += +ll[0]; c[1] += +ll[1]; c[2]++; });
-  const centro = s => { const k = lugarN(String(s).split(',')[0]); const c = cen[k]; return c ? [c[0] / c[2], c[1] / c[2]] : null; };
+  const G = geoOrig(), centro = s => { const k = lugarN(String(s).split(',')[0]); const c = cen[k]; if (c) return [c[0] / c[2], c[1] / c[2]]; const g = G[origKey(s)]; return g ? g : null; };
   const filas = H.map(r => { const o = String(val(r,'aorig')), ol = lugarN(o.split(',')[0]), hl = lugarN(r.localidad), ll = latlon(r), oc = centro(o);
     return { r, origen: o.split(',')[0].trim(), destino: r.localidad, local: ol === hl, otroPartido: /,/.test(o) && normP(o.split(',')[1]) !== normP(r.partido), oc, ll: ll ? [+ll[0], +ll[1]] : null, km: oc && ll ? km(oc[0], oc[1], +ll[0], +ll[1]) : null }; });
   const corr = topDe(filas.filter(f => !f.local).map(f => `${f.origen} → ${f.destino}`)).slice(0, 10);
@@ -2888,7 +2912,9 @@ function pintarFoco(A, N, R, bar){
       L.circleMarker(f.oc, { radius:5, weight:1.5, color:'#fff', fillColor:'#5B3E96', fillOpacity:1 }).bindTooltip('Vive: ' + esc(f.origen)).addTo(aLayers);
       L.circleMarker(f.ll, { radius:6, weight:1.5, color:'#fff', fillColor:'#B5172E', fillOpacity:1 }).bindPopup(() => popupHTML(f.r)).addTo(aLayers); });
     const b = (O.filas || []).filter(f => f.oc && f.ll).flatMap(f => [f.oc, f.ll]); if (b.length) amap.fitBounds(L.latLngBounds(b).pad(0.15), { paddingTopLeft:[20, 120] });
-    bar.innerHTML = `<span>De dónde vienen los aprehendidos: ${n} recorridos (violeta = localidad donde vive, rojo = lugar del hecho). Los que viven en la misma localidad no se dibujan.</span><button class="btn sm primary" data-act="focoOff">Ver todo el mapa</button>`;
+    const G = geoOrig(), falta = [...new Set((O.filas || []).filter(f => !f.oc && !f.local).map(f => String(val(f.r,'aorig'))))], pend = falta.filter(o => !(origKey(o) in G)), noUb = falta.filter(o => G[origKey(o)] === 0);
+    if (pend.length && !geoOrigCorriendo) ubicarOrigenes(pend);
+    bar.innerHTML = `<span>De dónde vienen los aprehendidos: ${n} recorridos (violeta = localidad donde vive, rojo = lugar del hecho). Los que viven en la misma localidad no se dibujan.${pend.length ? ` <b>Ubicando ${pend.length} localidades por internet…</b> (unos segundos; se dibujan solas)` : ''}${noUb.length ? ` No se pudo ubicar: ${esc(noUb.slice(0, 4).join(' · '))}${noUb.length > 4 ? '…' : ''} (conviene escribir solo localidad y partido).` : ''}</span><button class="btn sm primary" data-act="focoOff">Ver todo el mapa</button>`;
   } else if (FOCO.les) {
     const LS = lesionesDe($('#aPar')?.value || '', $('#aCom')?.value || '').filter(r => latlon(r)), X = analisisLesiones(LS), rep_ = new Set(X.domicilios.flatMap(z => z.g));
     LS.forEach(r => { const ll = latlon(r), fuerte = rep_.has(r); L.circleMarker(ll, { radius: fuerte ? 7 : 4.5, weight: fuerte ? 2.5 : 0.8, color: fuerte ? '#111' : '#fff', fillColor: /Lesiones|Riña/.test(val(r,'modal')) ? '#C2185B' : '#F48FB1', fillOpacity:.9 }).bindPopup(() => popupHTML(r)).addTo(aLayers); });
