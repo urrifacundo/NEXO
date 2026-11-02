@@ -361,6 +361,9 @@ const CAT_ITEMS = [['ROBO','Robos (todas las modalidades)'], ['HURTO','Hurtos'],
 let CATCFG = null;
 function catDe(d, m){ if (!CATCFG) CATCFG = Object.assign({}, CAT_DEF, lsGet(MODO + '_rd_cat', {})); return CATCFG[d + ' · ' + m] || CATCFG[d] || 'analizar'; }
 let OPS_ZONA = null; const opsZona = z => { if (!OPS_ZONA) OPS_ZONA = lsGet(MODO + '_rd_opszona', {}); return OPS_ZONA[z] || 1; };
+// reparto: 'zona' (Oeste / Sur, como siempre) o 'parejo' (N paquetes iguales con los 6 partidos)
+const reparto = () => Object.assign({ modo:'zona', n:3 }, lsGet(MODO + '_rd_reparto', {}));
+const ORDEN_PART = ['LA MATANZA','TRES DE FEBRERO','MORON','LOMAS DE ZAMORA','LANUS','QUILMES'];
 let LAST_ROWS = [];
 
 /* ===================== catálogo ===================== */
@@ -830,6 +833,9 @@ async function cargarCrudo(file){
   if (!rows.length || !('partido_hecho' in rows[0]) || !('calificaciones' in rows[0])) return msgSetup('Este archivo no tiene el formato del Excel de denuncias (faltan columnas como partido_hecho o calificaciones). Si es un Excel exportado desde NEXO, usá “Importar Excel exportado”.', true);
   const conIA = Object.keys(rows[0]).some(k => /^IA_/i.test(k));
   LAST_ROWS = rows;
+  let sumados = [];
+  if (MODO === 'operadora' && cfgOk) { const tiene = new Set(op.partidos.map(normP)); sumados = [...new Set(rows.map(x => normP(x.partido_hecho)))].filter(p => ORDEN_PART.includes(p) && !tiene.has(p));
+    if (sumados.length) { op.partidos = [...op.partidos, ...sumados]; const inp = $('#opPartidos'); if (inp) inp.value = op.partidos.join(', '); } }
   const ps = new Set(op.partidos.map(normP));
   const porPartido = {}, huerfanos = []; let mis = 0, utiles = 0, excl = 0, nuevos = 0, ya = 0;
   const lote = [];
@@ -868,6 +874,7 @@ async function cargarCrudo(file){
   const alertas = lote.filter(r => r.chk !== 'OK' || r.alertCoord).length;
   $('#loadSummary').innerHTML = `
     <div><b>${rows.length}</b> hechos en el archivo · <b>${mis}</b> de tus partidos ${conIA ? '<span class="flag info">LEÍDO POR IA</span>' : ''}</div>
+    ${sumados.length ? `<div class="flag info" style="white-space:normal">Este paquete trae hechos de ${esc(sumados.join(', '))}: se sumaron a tus partidos. Lo que ya cargaste sigue igual.</div>` : ''}
     <div><b>${utiles}</b> útiles para el análisis · <b>${excl}</b> descartados (lesiones culposas, daños, accidentes, no delitos)</div>
     <div><b>${nuevos}</b> nuevos · <b>${ya}</b> ya estaban (se conservó lo trabajado) · <b>${alertas}</b> con la ubicación a revisar</div>
     ${mis === 0 ? `<div class="flag bad">Ningún hecho coincide con tus partidos. El archivo trae: ${otros.map(([p,n])=>esc(p)+' ('+n+')').join(', ')}</div>` : otros.length ? `<div class="hint">No son tuyos: ${otros.map(([p,n])=>esc(p)+' ('+n+')').join(', ')}</div>` : ''}
@@ -898,7 +905,25 @@ function partesPaquete(a){
   Object.values(g).sort((p, q) => q.length - p.length).forEach(gr => partes.reduce((m, p) => p.rows.length < m.rows.length ? p : m).rows.push(...gr));
   return partes;
 }
-// hechos de delitos que se sumaron hoy (estaban "fuera") y todavía no se mandaron a ninguna operadora
+// reparto parejo: N paquetes de tamaño parecido; cada comisaría entera y las del mismo partido juntas (en el orden de los partidos)
+function partesParejo(){
+  const n = Math.max(1, reparto().n), rows = filasPaquete({ partidos: ORDEN_PART });
+  const g = {}; rows.forEach(x => { const c = String(x.dependencia || 'Sin dependencia').trim().toUpperCase(); (g[c] ||= { dep: c, rows: [], part: {} }).rows.push(x); g[c].part[normP(x.partido_hecho)] = (g[c].part[normP(x.partido_hecho)] || 0) + 1; });
+  const grupos = Object.values(g).map(x => { x.p = Object.entries(x.part).sort((a, b) => b[1] - a[1])[0][0]; x.o = ORDEN_PART.indexOf(x.p); return x; })
+    .sort((a, b) => (a.o - b.o) || a.dep.localeCompare(b.dep));
+  const partes = Array.from({ length: n }, (_, i) => ({ label: `Operadora ${i + 1}`, rows: [] }));
+  let i = 0, resto = rows.length;
+  for (const gr of grupos) {
+    const meta = resto / (n - i), cur = partes[i].rows.length;
+    if (i < n - 1 && cur > 0 && cur + gr.rows.length / 2 > meta) { resto -= cur; i++; }
+    partes[i].rows.push(...gr.rows);
+  }
+  partes.forEach(p => { const c = {}; p.rows.forEach(x => { const k = normP(x.partido_hecho); c[k] = (c[k] || 0) + 1; }); p.partidos = ORDEN_PART.filter(k => c[k]).map(k => ({ p: k, n: c[k] })); });
+  return partes;
+}
+const partesSup = () => reparto().modo === 'parejo' ? [{ i: 'P', partes: partesParejo() }] : ASIG_OPS.map((a, i) => ({ i, partes: partesPaquete(a) }));
+const nombreP = s => s.replace('TRES DE FEBRERO', '3 de Febrero').replace('LOMAS DE ZAMORA', 'Lomas').replace(/\B\w+/g, w => w.toLowerCase());
+// hechos de delitos que se sumaron hoy ("fuera") y todavía no se mandaron a ninguna operadora
 function filaDeRec(r){ return { delito_id: r.id, ipp: r.ipp, fecha_carga: r.fcarga, dependencia: r.dep, fecha_inicio_hecho: r.fecha, hora_inicio_hecho: r.hora, partido_hecho: r.partido, localidad_hecho: r.localidad,
   latitud: r.lat0, longitud: r.lon0, calle: r.calle, altura: r.altura, entre: r.entre, calificaciones: r.cal, relato: r.relato }; }
 function complementarios(){
@@ -912,9 +937,11 @@ function complementarios(){
   const idsCrudo = new Set(LAST_ROWS.map(idFila)), repartido = LAST_ROWS.some(x => RECS.get(idFila(x))?.paq);
   const cand = mios().filter(r => !r.paq && !r.f.delito && (r.f.estado || 'Pendiente') === 'Pendiente' && r.relato && catR(r) !== 'fuera' && toca(r) && idsCrudo.has(r.id) && repartido);
   const out = [];
-  ASIG_OPS.forEach((a, i) => {
-    const ps = new Set(a.partidos.map(normP)), zn = zonaDe(a), k = opsZona(zn), rs = cand.filter(r => ps.has(normP(r.partido))); if (!rs.length) return;
-    const labels = k <= 1 ? [zn] : Array.from({ length: k }, (_, j) => `${zn} ${j + 1}`), partes = labels.map(l => ({ label: l, recs: [] }));
+  const zonas = reparto().modo === 'parejo' ? [{ partidos: ORDEN_PART, labels: Array.from({ length: reparto().n }, (_, j) => `Operadora ${j + 1}`) }]
+    : ASIG_OPS.map(a => { const zn = zonaDe(a), k = opsZona(zn); return { partidos: a.partidos, labels: k <= 1 ? [zn] : Array.from({ length: k }, (_, j) => `${zn} ${j + 1}`) }; });
+  zonas.forEach(a => {
+    const ps = new Set(a.partidos.map(normP)), rs = cand.filter(r => ps.has(normP(r.partido))); if (!rs.length) return;
+    const labels = a.labels, partes = labels.map(l => ({ label: l, recs: [] }));
     // cada dependencia va a la operadora que ya la tiene; si es nueva, a la que tiene menos
     const dueño = {}; mios().forEach(r => { if (r.paq && labels.includes(r.paq)) { const d = String(r.dep || '').trim().toUpperCase(); (dueño[d] ||= {})[r.paq] = ((dueño[d] || {})[r.paq] || 0) + 1; } });
     const g = {}; rs.forEach(r => { const d = String(r.dep || 'Sin dependencia').trim().toUpperCase(); (g[d] ||= []).push(r); });
@@ -946,12 +973,13 @@ function complementariosHTML(){
 function refrescarPaquetes(){ const pb = $('#paqBox'); if (pb) pb.innerHTML = (LAST_ROWS.length ? paquetesHTML() : '') + complementariosHTML(); const pm = $('#paqModal'); if (pm) pm.innerHTML = complementariosHTML(); }
 function paquetesHTML(){
   if (MODO !== 'supervisor' || !LAST_ROWS.length) return '';
-  return `<div style="margin-top:10px"><b>Paquetes para las operadoras</b> (solo los hechos que se analizan o van al mapa):</div><div class="paq">${ASIG_OPS.map((a, i) => partesPaquete(a).map((p, j) => `<button class="btn" data-paq="${i}:${j}">Paquete ${esc(p.label)} (${p.rows.length} hechos)</button>`).join('')).join('')}</div>
-    <p class="hint">Mandale a cada una su paquete. Si una zona tiene más de una operadora, cada comisaría queda entera en un solo paquete (se cambia en “Qué se analiza y operadoras”).</p>`;
+  const R = reparto(), par = R.modo === 'parejo';
+  return `<div style="margin-top:10px"><b>Paquetes para las operadoras</b> (solo los hechos que se analizan o van al mapa)${par ? ` · <b>reparto parejo entre ${R.n}</b>` : ''}:</div><div class="paq">${partesSup().map(z => z.partes.map((p, j) => `<button class="btn" data-paq="${z.i}:${j}">Paquete ${esc(p.label)} (${p.rows.length} hechos)${par && p.partidos ? `<br><span class="hint" style="font-weight:400">${esc(p.partidos.map(x => nombreP(x.p) + ' ' + x.n).join(' · '))}</span>` : ''}</button>`).join('')).join('')}</div>
+    <p class="hint">Mandale a cada una su paquete. Cada comisaría queda entera en un solo paquete. ${par ? 'Con reparto parejo, cualquier operadora puede abrir cualquier paquete: NEXO Carga le suma solo los partidos que trae.' : 'Si una zona tiene más de una operadora, el paquete se reparte entre ellas.'} Se cambia en “Qué se analiza y operadoras”.</p>`;
 }
 function contarPaquete(a){ return filasPaquete(a).length; }
 async function descargarPaquete(i, j){
-  const p = partesPaquete(ASIG_OPS[i])[j || 0], rows = p ? p.rows : [];
+  const p = (i === 'P' ? partesParejo() : partesPaquete(ASIG_OPS[i]))[j || 0], rows = p ? p.rows : [];
   if (!rows.length) return toast('No hay hechos para ese paquete en este Excel.');
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Hechos'); XLSX.utils.book_append_sheet(wb, hojaConfig(), 'NEXO_CONFIG');
   XLSX.writeFile(wb, `Paquete_${norm(p.label).replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')}_${todayISO()}.xlsx`);
@@ -1767,10 +1795,18 @@ function renderCfg(box){
   const op = (v, k0) => (k0 === 'LESIONES' ? [['aparte','Módulo aparte'], ['fuera','Fuera']] : [['analizar','Analizar'], ['mapa','Solo mapa'], ['fuera','Fuera']]).map(([k, l]) => `<option value="${k}"${v === k ? ' selected' : ''}>${l}</option>`).join('');
   el.innerHTML = `<table class="t"><tr><th>Delito</th><th>Va a</th></tr>${CAT_ITEMS.map(([k, l]) => `<tr><td>${esc(l)}</td><td><select data-cat="${esc(k)}">${op(CATCFG[k] || 'analizar', k)}</select></td></tr>`).join('')}</table>
     <p class="hint">“Solo mapa”: la venta de droga se ve como zonas de venta y armas, homicidios y otros graves como capa de violencia. Se usan como contexto de las alertas, pero no cuentan en totales, series, patrones ni tablas.</p>
-    <div style="margin-top:10px"><b>Operadoras por zona</b> (mismos partidos; el paquete se reparte entre ellas)</div>
-    <div class="paq">${ASIG_OPS.map(a => `<label class="hint" style="display:flex;gap:6px;align-items:center"><b>${esc(a.nombre)}</b> <select data-opszona="${esc(zonaDe(a))}">${[1,2,3,4].map(n => `<option${opsZona(zonaDe(a)) === n ? ' selected' : ''}>${n}</option>`).join('')}</select></label>`).join('')}</div>`;
+    <div style="margin-top:10px"><b>Cómo se reparten los paquetes</b></div>
+    <div class="paq" style="flex-direction:column;align-items:flex-start;gap:6px">
+      <label class="hint" style="display:flex;gap:6px;align-items:center"><input type="radio" name="repModo" value="zona"${reparto().modo !== 'parejo' ? ' checked' : ''}> <b>Por zona</b> (Oeste y Sur por separado):
+        ${ASIG_OPS.map(a => `${esc(zonaDe(a))} <select data-opszona="${esc(zonaDe(a))}">${[1,2,3,4].map(n => `<option${opsZona(zonaDe(a)) === n ? ' selected' : ''}>${n}</option>`).join('')}</select>`).join(' ')}</label>
+      <label class="hint" style="display:flex;gap:6px;align-items:center"><input type="radio" name="repModo" value="parejo"${reparto().modo === 'parejo' ? ' checked' : ''}> <b>Parejo entre</b> <select data-repn>${[2,3,4,5,6,7,8].map(n => `<option${reparto().n === n ? ' selected' : ''}>${n}</option>`).join('')}</select> operadoras (los 6 partidos, la misma cantidad de hechos cada una)</label>
+    </div>
+    <p class="hint">Parejo sirve cuando alguien falta o se suma gente: cada comisaría sigue entera y las del mismo partido van juntas.</p>`;
   el.querySelectorAll('[data-cat]').forEach(s => s.onchange = () => { const antes = CATCFG[s.dataset.cat] || 'analizar'; const c = lsGet(MODO + '_rd_cat', {}); c[s.dataset.cat] = s.value; lsSet(MODO + '_rd_cat', c); CATCFG = null; catDe('', '');
     refrescarPaquetes(); if (box) { FOCO = null; reAnalisis(); } else renderCfg(); toast('Guardado.'); });
+  const guardaRep = o => { lsSet(MODO + '_rd_reparto', Object.assign(reparto(), o)); refrescarPaquetes(); toast('Guardado.'); };
+  el.querySelectorAll('[name="repModo"]').forEach(r => r.onchange = () => guardaRep({ modo: r.value }));
+  const rn = el.querySelector('[data-repn]'); if (rn) rn.onchange = () => { guardaRep({ n: +rn.value, modo: 'parejo' }); el.querySelector('[name="repModo"][value="parejo"]').checked = true; };
   el.querySelectorAll('[data-opszona]').forEach(s => s.onchange = () => { OPS_ZONA = Object.assign(lsGet(MODO + '_rd_opszona', {}), { [s.dataset.opszona]: +s.value }); lsSet(MODO + '_rd_opszona', OPS_ZONA); refrescarPaquetes(); toast('Guardado.'); });
 }
 function renderCapasSetup(){
@@ -2704,13 +2740,9 @@ function avanceHTML(){
   const fila = (nombre, rs) => { const c = { t: rs.length, C: 0, P: 0, Q: 0, D: 0, s: 0, h: 0 }; const quien = new Set();
     rs.forEach(r => { const e = r.f.estado || 'Pendiente'; c[e === 'Completo' ? 'C' : e === 'Consultar' ? 'Q' : e === 'Descartar' ? 'D' : 'P']++; if (e !== 'Pendiente' && r.f.oper) quien.add(r.f.oper); if (r.f.secs && e !== 'Pendiente') { c.s += r.f.secs; c.h++; } });
     return `<tr><td><b>${esc(nombre)}</b><br><span class="hint">${esc([...quien].join(', ') || 'sin avance importado')}</span></td><td>${c.t}</td><td>${c.C + c.D}</td><td>${c.Q}</td><td>${c.P}</td><td>${c.h ? (c.s / c.h / 60).toFixed(1) : '—'}</td></tr>`; };
-  const filas = ASIG_OPS.map(a => {
-    const ps = new Set(a.partidos.map(normP)), rs = mios().filter(r => ps.has(normP(r.partido)) && catR(r) !== 'fuera'), zn = zonaDe(a);
-    const etiquetas = [...new Set(rs.map(r => r.paq).filter(p => p && p.startsWith(zn)))].sort();
-    if (!etiquetas.length) return fila(a.nombre, rs);
-    const sin = rs.filter(r => !etiquetas.includes(r.paq));
-    return etiquetas.map(l => fila('Paquete ' + l, rs.filter(r => r.paq === l))).join('') + (sin.length ? fila(a.nombre + ' · sin paquete asignado', sin) : '');
-  }).join('');
+  const todos = mios().filter(r => catR(r) !== 'fuera'), etiq = [...new Set(todos.map(r => r.paq).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+  const filas = etiq.map(l => fila('Paquete ' + l, todos.filter(r => r.paq === l))).join('')
+    + ASIG_OPS.map(a => { const ps = new Set(a.partidos.map(normP)), sin = todos.filter(r => !r.paq && ps.has(normP(r.partido))); return sin.length ? fila(a.nombre + ' · sin paquete asignado', sin) : ''; }).join('');
   const cons = mios().filter(r => r.f.estado === 'Consultar');
   return `<h3>Avance de las operadoras</h3>
     <table class="t"><tr><th>Asignación</th><th>Hechos</th><th>Hechos listos</th><th>Consultas</th><th>Faltan</th><th>Min por hecho</th></tr>${filas}</table>
@@ -2942,7 +2974,7 @@ function irTab(t){
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-f],[data-act],.item,[data-tab],[data-serie],[data-sest],[data-radio],[data-goto],[data-cruce],[data-paq],[data-consulta],[data-com],[data-informe],[data-foconarco],[data-lg],[data-informepunto],[data-focobarrio],[data-focodes],[data-ir],[data-patron],[data-comp],[data-ventana],[data-accion],[data-util],[data-poi]'); if (!t) return;
   if (t.dataset.com) { const sel = $('#aCom'); if (sel) { sel.value = t.dataset.com === 'Sin comisaría' ? '' : t.dataset.com; renderAnalisis(); } return; }
-  if (t.dataset.paq) { const [i, j] = t.dataset.paq.split(':').map(Number); return descargarPaquete(i, j || 0); }
+  if (t.dataset.paq) { const [a, b] = t.dataset.paq.split(':'); return descargarPaquete(a === 'P' ? 'P' : +a, +b || 0); }
   if (t.dataset.informe) return informe(t.dataset.informe);
   if (t.dataset.informepunto != null) return informePunto(+t.dataset.informepunto, t.dataset.tipo);
   if (t.dataset.consulta) return verConsulta(t.dataset.consulta);
