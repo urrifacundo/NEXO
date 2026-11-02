@@ -2492,8 +2492,33 @@ function sugOrigen(r){
 }
 // localidades de origen que no están entre los hechos de esta PC: se buscan por internet (una vez) y quedan guardadas
 const SIN_DOM = /^(no (especifica|aporta|sabe|recuerda|posee|tiene|consta|surge)|sin (dato|domicilio|especificar)|s\/?d|desconoce|desconocido|ignorado|nn|-+)\b/;
-let GEO_ORIG = null, geoOrigCorriendo = false;
-const geoOrig = () => GEO_ORIG ||= lsGet(MODO + '_rd_geoOrig', {});
+let GEO_ORIG = null, geoOrigCorriendo = false, LOCS_ORIG = null;
+const ALIAS_LOC = { 'san f solano':'San Francisco Solano', 'sn f solano':'San Francisco Solano', 'fco solano':'San Francisco Solano', 'francisco solano':'San Francisco Solano', 'solano':'San Francisco Solano',
+  'sn justo':'San Justo', 'capital federal':'CABA', 'capital':'CABA', 'caba':'CABA', 'ciudad autonoma de buenos aires':'CABA', 'cdad autonoma':'CABA', 'laferrere':'Gregorio de Laferrere', 'g de laferrere':'Gregorio de Laferrere',
+  'catan':'González Catán', 'gonzalez catan':'González Catán', 'v celina':'Villa Celina', 'lomas':'Lomas de Zamora', 'tres de febrero':'Tres de Febrero', '3 de febrero':'Tres de Febrero' };
+const capW = s => String(s).trim().toLowerCase().replace(/(^|\s)(\S)/g, (m, a, b) => a + b.toUpperCase()).replace(/ (De|Del|La|Las|Los|Y) /g, w => w.toLowerCase());
+const aliasOrig = () => lsGet(MODO + '_rd_origAlias', {});
+// localidades conocidas: las de los hechos cargados + partidos + alias (la más larga que aparezca en el texto gana)
+function locsOrig(){
+  if (LOCS_ORIG) return LOCS_ORIG; const m = {};
+  for (const r of RECS.values()) { const k = lugarN(r.localidad || ''); if (k.length >= 4 && !m[k]) m[k] = capW(r.localidad); const pk = lugarN(r.partido || ''); if (pk && !m[pk]) m[pk] = capW(r.partido); }
+  Object.entries(ALIAS_LOC).forEach(([k, v]) => { m[k] = v; });
+  return LOCS_ORIG = Object.entries(m).sort((a, b) => b[0].length - a[0].length);
+}
+// de "SILGUERO ... DOMICILIADO EN ... DE LA LOCALIDAD DE QUILMES" saca "Quilmes"
+function origenLoc(o){
+  const t0 = String(o || '').trim(); if (!t0) return '';
+  const man = aliasOrig()[lugarN(t0)]; if (man) return man;
+  const t = ' ' + lugarN(t0) + ' ';
+  const m = t.match(/(?:localidad|barrio|ciudad) de ([a-z ]+?)(?: partido| pdo| provincia| entre| calle| $)/);
+  const L = locsOrig();
+  if (m) { const cand = ' ' + m[1].trim() + ' '; const k = L.find(([k]) => cand.includes(' ' + k + ' ')); if (k) return k[1]; }
+  const k = L.find(([k]) => t.includes(' ' + k + ' ')); if (k) return k[1];
+  let ult = t0.split(',').map(x => x.trim()).filter(Boolean).at(-1) || t0;
+  if (/\s+en\s+/i.test(ult)) ult = ult.split(/\s+en\s+/i).at(-1);
+  return /\d/.test(ult) || ult.length > 40 ? '' : capW(ult);
+}
+const geoOrig = () => GEO_ORIG ||= lsGet(MODO + '_rd_geoOrig2', {});
 const origKey = s => lugarN(s);
 async function ubicarOrigenes(lista){
   if (geoOrigCorriendo) return; geoOrigCorriendo = true; const G = geoOrig(); let hechos = 0;
@@ -2506,11 +2531,11 @@ async function ubicarOrigenes(lista){
     for (const q of pruebas) {
       try { const js = await (await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ar&q=' + encodeURIComponent(q))).json();
         await new Promise(r => setTimeout(r, 1100));
-        if (js.length) { const la = +js[0].lat, lo = +js[0].lon; if (la > -36 && la < -33.5 && lo > -60 && lo < -57) { res = [+la.toFixed(5), +lo.toFixed(5)]; hechos++; break; } }
+        if (js.length) { const la = +js[0].lat, lo = +js[0].lon; if (la > -35.2 && la < -34.4 && lo > -59.1 && lo < -58.0) { res = [+la.toFixed(5), +lo.toFixed(5)]; hechos++; break; } }
       } catch(e) { cortado = true; break; }
     }
     if (cortado) break; G[k] = res;
-    lsSet(MODO + '_rd_geoOrig', G);
+    lsSet(MODO + '_rd_geoOrig2', G);
   }
   geoOrigCorriendo = false; if (FOCO && FOCO.orig) reAnalisis();
 }
@@ -2520,9 +2545,10 @@ function origenAprehendidos(base){
   if (!H.length) return { n: 0, conA };
   // centro de cada localidad, a partir de los hechos ubicados de esta computadora
   const cen = {}; [...RECS.values()].forEach(r => { const ll = latlon(r); if (!ll || !r.localidad) return; const k = lugarN(r.localidad), c = (cen[k] ||= [0, 0, 0]); c[0] += +ll[0]; c[1] += +ll[1]; c[2]++; });
-  const G = geoOrig(), centro = s => { const k = lugarN(String(s).split(',')[0]); const c = cen[k]; if (c) return [c[0] / c[2], c[1] / c[2]]; const g = G[origKey(s)]; return g ? g : null; };
-  const filas = H.map(r => { const o = String(val(r,'aorig')), ol = lugarN(o.split(',')[0]), hl = lugarN(r.localidad), ll = latlon(r), oc = centro(o);
-    return { r, origen: o.split(',')[0].trim(), destino: r.localidad, local: ol === hl, otroPartido: /,/.test(o) && normP(o.split(',')[1]) !== normP(r.partido), oc, ll: ll ? [+ll[0], +ll[1]] : null, km: oc && ll ? km(oc[0], oc[1], +ll[0], +ll[1]) : null }; });
+  LOCS_ORIG = null; const locPart = {}; [...RECS.values()].forEach(r => { if (r.localidad) locPart[lugarN(r.localidad)] ||= normP(r.partido); });
+  const G = geoOrig(), centro = loc => { if (!loc) return null; const k = lugarN(loc); const c = cen[k]; if (c) return [c[0] / c[2], c[1] / c[2]]; const g = G[origKey(loc)]; return g ? g : null; };
+  const filas = H.map(r => { const o = String(val(r,'aorig')), loc = origenLoc(o), ol = lugarN(loc), hl = lugarN(r.localidad), ll = latlon(r), oc = centro(loc), pOrig = locPart[ol] || (ol === 'caba' ? 'CABA' : '');
+    return { r, texto: o, origen: loc || o, loc, destino: r.localidad, local: !!loc && ol === hl, otroPartido: !!pOrig && pOrig !== normP(r.partido), oc, ll: ll ? [+ll[0], +ll[1]] : null, km: oc && ll ? km(oc[0], oc[1], +ll[0], +ll[1]) : null }; });
   const corr = topDe(filas.filter(f => !f.local).map(f => `${f.origen} → ${f.destino}`)).slice(0, 10);
   const porDest = {}; filas.forEach(f => { const d = f.destino, x = (porDest[d] ||= { n: 0, fuera: 0, orig: [] }); x.n++; if (!f.local) { x.fuera++; x.orig.push(f.origen); } });
   const kms = filas.map(f => f.km).filter(v => v != null).sort((a, b) => a - b);
@@ -2536,7 +2562,13 @@ function origenHTML(O){
     <div class="seg" style="margin:6px 0"><button class="btn sm" data-act="focoOrig">Ver flechas en el mapa</button></div>
     ${O.corr.length ? `<table class="t"><tr><th>Corredor (vive → roba)</th><th>Aprehendidos</th></tr>${O.corr.map(([k, n]) => `<tr><td>${esc(k)}</td><td>${n}</td></tr>`).join('')}</table>` : ''}
     ${O.porDest.length ? `<p class="hint" style="margin:8px 0 3px"><b>Por lugar del hecho</b></p><table class="t"><tr><th>Dónde roban</th><th>Aprehendidos</th><th>De afuera</th><th>Vienen de</th></tr>${O.porDest.map(([d, x]) => `<tr><td>${esc(d)}</td><td>${x.n}</td><td>${p(x.fuera, x.n)}%</td><td>${esc(topDe(x.orig).slice(0, 3).map(([o, n]) => `${o} (${n})`).join(', '))}</td></tr>`).join('')}</table>` : ''}
-    <p class="hint">Solo cuenta hechos con aprehendidos y domicilio cargado: muestra tendencias, no a todos los autores.</p>`;
+    <p class="hint">Solo cuenta hechos con aprehendidos y domicilio cargado: muestra tendencias, no a todos los autores.</p>
+    ${(() => { const u = {}; O.filas.forEach(f => { const x = (u[f.texto] ||= { f, n: 0 }); x.n++; });
+      const L = Object.values(u).map(x => ({ ...x, ok: x.f.local || !!x.f.oc })).sort((a, b) => a.ok - b.ok);
+      const mal = L.filter(x => !x.ok).length;
+      return `<details style="margin-top:8px"${mal ? ' open' : ''}><summary class="hint" style="cursor:pointer"><b>Domicilios cargados · ${L.length}</b>${mal ? ` · <span style="color:var(--bad)">${mal} sin ubicar</span>` : ''} (lo que escribió la operadora y la localidad que tomó NEXO)</summary>
+        <table class="t" style="margin-top:4px"><tr><th>Lo que escribió</th><th>Se tomó como</th><th></th></tr>${L.map(x => `<tr><td style="font-size:12px">${esc(x.f.texto.slice(0, 90))}${x.f.texto.length > 90 ? '…' : ''}${x.n > 1 ? ` <span class="hint">(${x.n})</span>` : ''}</td><td>${x.f.loc ? esc(x.f.loc) : '<span style="color:var(--bad)">sin localidad</span>'}${!x.ok ? ' <span class="flag bad">SIN UBICAR</span>' : ''}<div class="origfix" style="margin-top:4px;display:none;gap:4px"><input class="txt" style="min-width:150px" placeholder="Localidad"><button class="btn sm primary" data-origok="${esc(x.f.texto)}">Guardar</button></div></td><td><button class="btn sm" data-origfix="1">Corregir</button></td></tr>`).join('')}</table>
+        <p class="hint">Corregir: escribí solo la localidad (ej. “Bernal” o “San Francisco Solano”). Se aplica a todos los hechos con ese mismo texto y queda guardado en esta PC. Los domicilios no salen en el informe ni en el parte.</p></details>`; })()}`;
 }
 
 /* ---------- 3) puntos que atraen el delito (OpenStreetMap) ---------- */
@@ -2944,9 +2976,9 @@ function pintarFoco(A, N, R, bar){
       L.circleMarker(f.oc, { radius:5, weight:1.5, color:'#fff', fillColor:'#5B3E96', fillOpacity:1 }).bindTooltip('Vive: ' + esc(f.origen)).addTo(aLayers);
       L.circleMarker(f.ll, { radius:6, weight:1.5, color:'#fff', fillColor:'#B5172E', fillOpacity:1 }).bindPopup(() => popupHTML(f.r)).addTo(aLayers); });
     const b = (O.filas || []).filter(f => f.oc && f.ll).flatMap(f => [f.oc, f.ll]); if (b.length) amap.fitBounds(L.latLngBounds(b).pad(0.15), { paddingTopLeft:[20, 120] });
-    const G = geoOrig(), falta = [...new Set((O.filas || []).filter(f => !f.oc && !f.local).map(f => String(val(f.r,'aorig'))))], pend = falta.filter(o => !(origKey(o) in G)), noUb = falta.filter(o => G[origKey(o)] === 0);
+    const G = geoOrig(), falta = [...new Set((O.filas || []).filter(f => !f.oc && !f.local && f.loc).map(f => f.loc))], pend = falta.filter(o => !(origKey(o) in G)), noUb = [...new Set((O.filas || []).filter(f => !f.oc && !f.local && (!f.loc || G[origKey(f.loc)] === 0)).map(f => f.loc || f.texto.slice(0, 40)))];
     if (pend.length && !geoOrigCorriendo) ubicarOrigenes(pend);
-    bar.innerHTML = `<span>De dónde vienen los aprehendidos: ${n} recorridos (violeta = localidad donde vive, rojo = lugar del hecho). Los que viven en la misma localidad no se dibujan.${pend.length ? ` <b>Ubicando ${pend.length} localidades por internet…</b> (unos segundos; se dibujan solas)` : ''}${noUb.length ? ` No se pudo ubicar: ${esc(noUb.slice(0, 4).join(' · '))}${noUb.length > 4 ? '…' : ''} (conviene escribir solo localidad y partido).` : ''}</span><button class="btn sm primary" data-act="focoOff">Ver todo el mapa</button>`;
+    bar.innerHTML = `<span>De dónde vienen los aprehendidos: ${n} recorridos (violeta = localidad donde vive, rojo = lugar del hecho). Los que viven en la misma localidad no se dibujan.${pend.length ? ` <b>Ubicando ${pend.length} localidades por internet…</b> (unos segundos; se dibujan solas)` : ''}${noUb.length ? ` Sin ubicar: ${noUb.length} (corregilos en el panel, en “Domicilios cargados”).` : ''}</span><button class="btn sm primary" data-act="focoOff">Ver todo el mapa</button>`;
   } else if (FOCO.les) {
     const LS = lesionesDe($('#aPar')?.value || '', $('#aCom')?.value || '').filter(r => latlon(r)), X = analisisLesiones(LS), rep_ = new Set(X.domicilios.flatMap(z => z.g));
     LS.forEach(r => { const ll = latlon(r), fuerte = rep_.has(r); L.circleMarker(ll, { radius: fuerte ? 7 : 4.5, weight: fuerte ? 2.5 : 0.8, color: fuerte ? '#111' : '#fff', fillColor: /Lesiones|Riña/.test(val(r,'modal')) ? '#C2185B' : '#F48FB1', fillOpacity:.9 }).bindPopup(() => popupHTML(r)).addTo(aLayers); });
@@ -2972,8 +3004,10 @@ function irTab(t){
 
 /* ===================== eventos ===================== */
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-f],[data-act],.item,[data-tab],[data-serie],[data-sest],[data-radio],[data-goto],[data-cruce],[data-paq],[data-consulta],[data-com],[data-informe],[data-foconarco],[data-lg],[data-informepunto],[data-focobarrio],[data-focodes],[data-ir],[data-patron],[data-comp],[data-ventana],[data-accion],[data-util],[data-poi]'); if (!t) return;
+  const t = e.target.closest('[data-origfix],[data-origok],[data-f],[data-act],.item,[data-tab],[data-serie],[data-sest],[data-radio],[data-goto],[data-cruce],[data-paq],[data-consulta],[data-com],[data-informe],[data-foconarco],[data-lg],[data-informepunto],[data-focobarrio],[data-focodes],[data-ir],[data-patron],[data-comp],[data-ventana],[data-accion],[data-util],[data-poi]'); if (!t) return;
   if (t.dataset.com) { const sel = $('#aCom'); if (sel) { sel.value = t.dataset.com === 'Sin comisaría' ? '' : t.dataset.com; renderAnalisis(); } return; }
+  if (t.dataset.origfix) { const d = t.closest('tr').querySelector('.origfix'); d.style.display = d.style.display === 'flex' ? 'none' : 'flex'; if (d.style.display === 'flex') d.querySelector('input').focus(); return; }
+  if (t.dataset.origok) { const v = t.parentElement.querySelector('input').value.trim(); const A = aliasOrig(); if (v) A[lugarN(t.dataset.origok)] = capW(v); else delete A[lugarN(t.dataset.origok)]; lsSet(MODO + '_rd_origAlias', A); toast(v ? 'Corregido: ' + capW(v) : 'Corrección borrada.'); return reAnalisis(); }
   if (t.dataset.paq) { const [a, b] = t.dataset.paq.split(':'); return descargarPaquete(a === 'P' ? 'P' : +a, +b || 0); }
   if (t.dataset.informe) return informe(t.dataset.informe);
   if (t.dataset.informepunto != null) return informePunto(+t.dataset.informepunto, t.dataset.tipo);
