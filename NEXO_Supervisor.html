@@ -2709,7 +2709,7 @@ function mapaTeselas(anal, marc, titulo, cab){
   const pad = 20, x0 = mx(lo0, z) - pad, y0 = my(la1, z) - pad, W = Math.round(mx(lo1, z) - mx(lo0, z) + 2 * pad), H = Math.round(my(la0, z) - my(la1, z) + 2 * pad);
   const X = o => mx(o, z) - x0, Y = a => my(a, z) - y0, dentro = ll => X(ll[1]) >= -10 && X(ll[1]) <= W + 10 && Y(ll[0]) >= -10 && Y(ll[0]) <= H + 10;
   const tiles = []; for (let tx = Math.floor(x0 / 256); tx <= Math.floor((x0 + W) / 256); tx++) for (let ty = Math.floor(y0 / 256); ty <= Math.floor((y0 + H) / 256); ty++)
-    tiles.push(`<img src="https://${'abcd'[(tx + ty) % 4]}.basemaps.cartocdn.com/light_all/${z}/${tx}/${ty}@2x.png" style="position:absolute;left:${(tx * 256 - x0).toFixed(0)}px;top:${(ty * 256 - y0).toFixed(0)}px;width:256px;height:256px" onerror="this.closest('.mt').classList.add('sinfondo');this.remove()">`);
+    tiles.push(`<img src="https://tile.openstreetmap.org/${z}/${tx}/${ty}.png" style="position:absolute;filter:saturate(.35) brightness(1.06);left:${(tx * 256 - x0).toFixed(0)}px;top:${(ty * 256 - y0).toFixed(0)}px;width:256px;height:256px" onerror="this.closest('.mt').classList.add('sinfondo');this.remove()">`);
   const mpp = 156543.03 * Math.cos((la0 + la1) / 2 * Math.PI / 180) / 2 ** z;
   const g = {}; pts0.forEach(p => { if (!p.loc || !dentro(p.ll)) return; const k = lugarN(p.loc), x = (g[k] ||= { n: 0, a: 0, o: 0, nom: nomLoc(p.loc) }); x.n++; x.a += p.ll[0]; x.o += p.ll[1]; });
   const etiq = []; Object.values(g).sort((a, b) => b.n - a.n).forEach(x => { if (etiq.length >= 12 || x.n < 4) return; const ex = X(x.o / x.n), ey = Y(x.a / x.n); if (etiq.some(e => Math.abs(e.x - ex) < 80 && Math.abs(e.y - ey) < 16)) return; etiq.push({ x: ex, y: ey, t: x.nom }); });
@@ -2719,7 +2719,7 @@ function mapaTeselas(anal, marc, titulo, cab){
     ${M.map(m => `<circle cx="${X(m.ll[1]).toFixed(1)}" cy="${Y(m.ll[0]).toFixed(1)}" r="${Math.max(8, m.r / mpp).toFixed(1)}" fill="${m.c}" fill-opacity=".22" stroke="${m.c}" stroke-width="2.5"/>`).join('')}
     <g class="lbl">${etiq.map(e => `<text x="${e.x.toFixed(1)}" y="${e.y.toFixed(1)}" font-size="12" font-weight="700" text-anchor="middle" fill="#3A4550" stroke="#fff" stroke-width="3" paint-order="stroke" font-family="Arial">${esc(e.t)}</text>`).join('')}</g>
     ${M.filter(m => /^Ventana/.test(m.t)).map(m => { const cx = X(m.ll[1]), cy = Y(m.ll[0]); return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="10" fill="#1D4A73" stroke="#fff" stroke-width="2"/><text x="${cx.toFixed(1)}" y="${(cy + 4.5).toFixed(1)}" font-size="12.5" font-weight="700" text-anchor="middle" fill="#fff" font-family="Arial">${m.t.match(/Ventana (\d+)/)[1]}</text>`; }).join('')}</svg>`;
-  return `<div class="mbloque">${cab || ''}${titulo ? `<div class="mtit">${esc(titulo)}</div>` : ''}<div class="mt" style="position:relative;width:${W}px;height:${H}px;max-width:100%;overflow:hidden;border-radius:10px;border:1px solid #DDE2DA;background:#F4F5F2">${tiles.join('')}${svg}<div class="atr">© OpenStreetMap · © CARTO</div></div></div>`;
+  return `<div class="mbloque">${cab || ''}${titulo ? `<div class="mtit">${esc(titulo)}</div>` : ''}<div class="mt" style="position:relative;width:${W}px;height:${H}px;max-width:100%;overflow:hidden;border-radius:10px;border:1px solid #DDE2DA;background:#F4F5F2">${tiles.join('')}${svg}<div class="atr">© OpenStreetMap</div></div></div>`;
 }
 function mapasInforme(anal, marc){
   // un mapa por zona (Oeste / Sur) para que se vea más grande; si es una sola zona, uno solo
@@ -2733,10 +2733,21 @@ const envolverImpresion = cuerpo => `<table class="pg"><thead><tr><td><div class
 const CSS_PG = `table.pg{width:100%;border-collapse:collapse}table.pg>thead>tr>td,table.pg>tbody>tr>td,table.pg>tfoot>tr>td{padding:0;border:0}.pgm{height:0}
 @media print{@page{size:A4;margin:0}.pgm{height:11mm}table.pg>tbody>tr>td{padding:0 12mm}}`;
 
-function generarParte(tipo, semIdx){
+window.pSet = (k, a, b) => { const x = document.getElementById('p' + k + '0'), y = document.getElementById('p' + k + '1'); if (x) x.value = a; if (y) y.value = b; if (k === 'B') { const s = document.getElementById('pB'); if (s) s.value = 'x'; } };
+// período anterior equivalente: la misma cantidad de semanas justo antes
+function periodoAnterior(SEM, i0, i1){ const n = i1 - i0 + 1, j1 = i0 - 1, j0 = Math.max(0, i0 - n); return j1 >= 0 ? [SEM[j0][0], SEM[j1][1]] : null; }
+function nombrePeriodo(SEM, p){
+  const w = SEM.filter(x => x[0] >= p[0] && x[1] <= p[1]), a = p[0].split('-').map(Number), b = p[1].split('-').map(Number), ult = new Date(b[0], b[1], 0).getDate();
+  if (w.length === 1 && w[0][0] === p[0] && w[0][1] === p[1]) return { tipo: 'semana', largo: `Semana del ${fLargo(p[0], p[1])}`, corto: fCorto(p[0], p[1]), unidad: 'La semana' };
+  if (a[0] === b[0] && a[1] === b[1] && a[2] === 1 && b[2] === ult) return { tipo: 'mes', largo: `Mes de ${MESES_N[a[1] - 1]} de ${a[0]}`, corto: capW(MESES_N[a[1] - 1]), unidad: 'El mes' };
+  return { tipo: 'periodo', largo: `Del ${fLargo(p[0], p[1])}`, corto: fCorto(p[0], p[1]), unidad: 'El período' };
+}
+function generarParte(tipo, opt){
   const fp = $('#aPar')?.value || '', fc = $('#aCom')?.value || '', pend = ($('#aPend')?.value ?? '1') === '1';
   const SEM = semanasCargadas(); if (!SEM.length) return toast('Cargá primero el crudo de la semana.');
-  const si = semIdx == null || semIdx < 0 || semIdx >= SEM.length ? SEM.length - 1 : semIdx, S = SEM[si], P = si > 0 ? SEM[si - 1] : null;
+  if (!opt || !opt.a) opt = { a: SEM.at(-1), b: SEM.length > 1 ? SEM.at(-2) : null };
+  const S = opt.a, P = opt.b && opt.b[0] ? opt.b : null, nA = nombrePeriodo(SEM, S), nB = P ? nombrePeriodo(SEM, P) : null;
+  const si = SEM.filter(w => w[1] <= S[1]).length - 1;
   const filt = r => (!fp || normP(r.partido) === fp) && (!fc || val(r,'comisaria') === fc);
   const base = baseAnalisis({ pend }).filter(filt), enS = r => r.fcarga >= S[0] && r.fcarga <= S[1], enP = r => P && r.fcarga >= P[0] && r.fcarga <= P[1];
   if (!base.length) return toast('No hay hechos para el informe con estos filtros.');
@@ -2766,18 +2777,18 @@ function generarParte(tipo, semIdx){
   const tarjeta = (titulo, cuerpo, color) => `<div class="card" style="border-left-color:${color}"><b>${titulo}</b><div>${cuerpo}</div></div>`;
   const com = c => esc(String(c || '').replace(/^CRIA\.\s*/,'').replace(/\s*\(.*\)$/, ''));
   const zonaTxt = fc ? com(fc) : fp ? nomLoc(fp) : (OP?.partidos || []).map(nomLoc).join(' · ');
-  const nSem = SEM.length, titulo = `Informe semanal · ${fLargo(S[0], S[1])}`;
-  const cuerpo = `<header><h1>NEXO · Informe semanal</h1><p><b>Semana del ${fLargo(S[0], S[1])}</b>${P ? ` · comparada con la del ${fLargo(P[0], P[1])}` : ''}<br>${esc(zonaTxt)} · generado el ${new Date().toLocaleDateString('es-AR')}</p></header><main>
+  const nSem = SEM.length, kind = nA.tipo === 'semana' ? 'Informe semanal' : nA.tipo === 'mes' ? 'Informe mensual' : 'Informe del período', titulo = `${kind} · ${nA.largo}`;
+  const cuerpo = `<header><h1>NEXO · ${kind}</h1><p><b>${nA.largo}</b>${P ? ` · comparado con: ${nB.largo.replace(/^./, c => c.toLowerCase())}` : ''}<br>${esc(zonaTxt)} · generado el ${new Date().toLocaleDateString('es-AR')}</p></header><main>
 <div class="hint" style="margin:0 0 8px">Semana por fecha de denuncia. Revisado por las operadoras: <b>${pctRev}%</b>${pend && pctRev < 100 ? ' (el resto, con lo que sugiere NEXO)' : ''}.</div>
-<h2>La semana en números</h2><div class="nums">
-<div class="num"><b>${anal.length}</b><span>${dels.length > 2 ? 'robos, hurtos y motos' : 'robos y hurtos'}${P ? `<br><span style="color:${colorC(anal.length, antes.length)}">${cambio(anal.length, antes.length)} vs. semana anterior</span>` : ''}</span></div>
+<h2>${nA.unidad} en números</h2><div class="nums">
+<div class="num"><b>${anal.length}</b><span>${dels.length > 2 ? 'robos, hurtos y motos' : 'robos y hurtos'}${P ? `<br><span style="color:${colorC(anal.length, antes.length)}">${cambio(anal.length, antes.length)} vs. ${esc(nB?.corto || '')}</span>` : ''}</span></div>
 ${dels.map(d => { const u = cnt(anal, r => val(r,'delito') === d), a = cnt(antes, r => val(r,'delito') === d); return `<div class="num"><b>${u}</b><span>${nomDel(d).toLowerCase()}${P ? `<br><span style="color:${colorC(u, a)}">${cambio(u, a) || '—'}</span>` : ''}</span></div>`; }).join('')}
 <div class="num"><b>${cnt(anal, conAprh)}</b><span>con aprehendidos</span></div></div>
-${P ? `<h2>Comparación con la semana anterior</h2><table class="cmp"><tr><th></th><th>${fCorto(P[0], P[1])}</th><th>${fCorto(S[0], S[1])}</th><th>Cambio</th></tr>
+${P ? `<h2>Comparación: ${esc(nB.corto)} contra ${esc(nA.corto)}</h2><table class="cmp"><tr><th></th><th>${fCorto(P[0], P[1])}</th><th>${fCorto(S[0], S[1])}</th><th>Cambio</th></tr>
   ${dels.map(d => filaC(nomDel(d), r => val(r,'delito') === d)).join('')}${filaC('Total', () => true, true)}
   ${partidosS.length > 1 ? `<tr><td colspan="4" class="sep">Por partido</td></tr>${partidosS.map(p => filaC(nomLoc(p), r => normP(r.partido) === p)).join('')}` : ''}
   <tr><td colspan="4" class="sep">Modalidades más frecuentes</td></tr>${modsTop.map(([k]) => filaC(k, r => modK(r) === k)).join('')}</table>
-  <p class="hint">El cambio se calcula por día${dS !== dP ? ` (esta semana tiene ${dS} días y la anterior ${dP})` : ''}. En rojo sube, en verde baja.</p>` : `<p class="hint">Es la primera semana cargada: la comparación aparece desde la próxima.</p>`}
+  <p class="hint">El cambio se calcula por día${dS !== dP ? ` (${esc(nA.corto)} tiene ${dS} días y ${esc(nB.corto)} ${dP})` : ''}. En rojo sube, en verde baja.</p>` : `<p class="hint">${SEM.length > 1 ? 'Sin comparación.' : 'Es la primera semana cargada: la comparación aparece desde la próxima.'}</p>`}
 ${V && V.lista.length ? `<h2>Dónde y cuándo poner presencia</h2><div class="big">${si + 1 < 3 ? `Estas son las <b>${V.lista.length} zonas y horarios</b> con más robos, hurtos y motos. Con ${plural(si + 1, 'semana', 'semanas')} de datos son orientativas: se confirman cuando se repiten semana a semana.` : `Estas <b>${V.lista.length} zonas y horarios</b> concentran el <b>${Math.round(100 * V.cubiertos / V.total)}%</b> de los robos, hurtos y motos con hora.`}</div>
 ${V.lista.map(v => tarjeta(`${v.i + 1}. ${esc(v.g)} · ${FR_TXT[v.fr]}`, `${esc(capW(v.calle))}, ${esc(nomLoc(v.loc))} · ${plural(v.items.length, 'hecho', 'hechos')} (${esc(v.mods)})<br><span class="hint">${com(v.com)}</span>`, '#1D4A73')).join('')}` : ''}
 ${tipo === 'pdf' ? mapasInforme(anal, marc) : '<h2>Mapa</h2><div id="mapa"></div>'}<p class="hint">Números en azul: dónde poner presencia · rojo: zonas de venta de droga · bordó: venta con violencia · naranja: zonas que se encendieron.${tipo === 'pdf' ? ' Puntos grises: robos, hurtos y motos de la semana.' : ' Requiere internet.'}</p>
@@ -2785,7 +2796,7 @@ ${tipo === 'pdf' ? mapasInforme(anal, marc) : '<h2>Mapa</h2><div id="mapa"></div
 ${zonas.length ? tarjeta(`Zonas de venta de droga (4 o más denuncias de venta juntas): ${zonas.length}`, zonas.slice(0, 5).map(z => esc([...new Set(z.m.map(x => nomLoc(x.r.localidad)))].join(', ')) + ` (${z.n} denuncias)`).join('<br>'), '#B5172E') : ''}
 ${viol.map(g => tarjeta(`Venta de droga con violencia: ${esc(nomLoc(g.miembros[0].r.localidad))}`, `${esc(capW(g.miembros[0].r.calle))} ${esc(g.miembros[0].r.altura)} · ${g.heridos ? plural(g.heridos, 'herido u homicidio', 'heridos u homicidios') + ' · ' : ''}${plural(g.violentos.length, 'hecho violento', 'hechos violentos')} cerca<br><span class="hint">${com(val(g.miembros[0].r,'comisaria'))}</span>`, '#7B1E2B')).join('')}
 ${reinc.map(z => tarjeta(`Allanado y sigue la venta: ${esc(nomLoc(z.g.miembros[0].r.localidad))}`, `${esc(capW(z.g.miembros[0].r.calle))} ${esc(z.g.miembros[0].r.altura)} · allanado el ${fmtF(z.allan[0].fecha)}, ${plural(z.despues.length, 'denuncia', 'denuncias')} de venta después`, '#B0281F')).join('')}
-${(M?.enc || []).slice(0, 5).map(z => tarjeta(`Zona que se encendió: ${esc(capW(z.calle))}`, `${esc(nomLoc(z.loc))} · ${z.u} hechos esta semana contra ${z.a.toFixed(1)} por semana antes (${esc(z.mods)})`, '#E07A1F')).join('')}
+${(M?.enc || []).slice(0, 5).map(z => tarjeta(`Zona que se encendió: ${esc(capW(z.calle))}`, `${esc(nomLoc(z.loc))} · ${z.u} hechos en la última semana contra ${z.a.toFixed(1)} por semana antes (${esc(z.mods)})`, '#E07A1F')).join('')}
 ${pats.map(c => tarjeta(esc(patronTitulo(c)), patronTexto(c), '#5B3E96')).join('')}
 ${series.map(s => tarjeta(`Serie confirmada: ${esc(s.tipo)} · ${s.items.length} hechos`, `${esc(s.zona)} · ${fmtF(s.desde)} a ${fmtF(s.hasta)} · en común: ${esc(s.rasgos || '—')}`, '#2C7A4B')).join('')}
 ${escal.map(z => tarjeta(`Lesiones o amenazas que escalan: ${esc(nomLoc(z.g[0].localidad))}`, `${com(val(z.g[0],'comisaria'))} · ${z.g.length} denuncias en el mismo domicilio: primero amenaza y después lesiones${z.arma ? ' · con arma' : ''}${z.pareja ? ' · pareja o ex pareja' : ''}`, '#C2185B')).join('')}
@@ -2804,7 +2815,7 @@ ${CSS_PG}
 @media print{body{background:#fff}header{-webkit-print-color-adjust:exact;print-color-adjust:exact;border-radius:10px}.card,.num,.big,table.cmp tr{break-inside:avoid}.card,.num,.big,table.cmp{border:1px solid #DDE2DA}.card,table.cmp th{-webkit-print-color-adjust:exact;print-color-adjust:exact}main{max-width:none;padding:12px 0}}</style></head><body>
 ${tipo === 'pdf' ? envolverImpresion(cuerpo) : cuerpo}
 ${tipo === 'pdf' ? '<script>(function(){const t0=Date.now();(function esperar(){const im=[...document.images];if(im.every(i=>i.complete)||Date.now()-t0>9000)return setTimeout(()=>window.print(),300);setTimeout(esperar,250)})()})()<\/script>' : ''}<script>if(window.L)try{const M=${JSON.stringify(marc)};const m=L.map('mapa');L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(m);const b=[];M.forEach(x=>{L.circle(x.ll,{radius:x.r,color:x.c,weight:2,fillOpacity:.25}).bindPopup(x.t).addTo(m);b.push(x.ll)});if(b.length)m.fitBounds(b,{padding:[20,20],maxZoom:15});else m.setView([-34.7,-58.5],11)}catch(e){document.getElementById('mapa').outerHTML='<p class="hint">El mapa necesita internet.</p>'}<\/script></body></html>`;
-  const nombre = `NEXO_Informe_semanal_${fCorto(S[0], S[1]).replace(/[^0-9a-z]+/gi, '_')}`;
+  const nombre = `NEXO_${kind.replace(/ /g, '_')}_${nA.corto.replace(/[^0-9a-z]+/gi, '_')}`;
   if (tipo === 'pdf') { const w = window.open('', '_blank'); if (!w) return toast('El navegador bloqueó la ventana. Permití las ventanas emergentes para este sitio.'); w.document.write(html); w.document.close(); toast('En la ventana de impresión elegí “Guardar como PDF” y mandá ese PDF por WhatsApp.', 5000); return html; }
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html], { type:'text/html' })); a.download = nombre + '.html'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   toast('Página descargada. En el celular se abre con Chrome (tocar el archivo → abrir con Chrome).', 5000);
@@ -3135,12 +3146,26 @@ document.addEventListener('click', e => {
       <p class="hint">Cambiá un delito y el análisis se actualiza al instante. Para sumar un delito, pasalo a “Analizar”; para sacarlo, a “Fuera”.</p><div id="cfgModal"></div><div id="paqModal"></div>`; renderCfg($('#cfgModal')); refrescarPaquetes(); $('#modal').hidden = false; return; }
   if (a === 'pFiltros' || a === 'pIr') { PANEL = PANEL === (a === 'pFiltros' ? 'filtros' : 'ir') ? '' : (a === 'pFiltros' ? 'filtros' : 'ir'); return reAnalisis(); }
   if (a === 'cfgArchivo') return descargarConfig();
-  if (a === 'parte') { const SEM = semanasCargadas(); $('#modalBody').className = ''; $('#modalBody').innerHTML = `<h2 style="margin:0 0 6px">Informe semanal</h2><p class="hint">Una semana (la de cada crudo cargado) comparada con la anterior. Sale con los filtros que tengas puestos (partido o comisaría). Sin relatos, nombres, DNI ni domicilios de víctimas.</p>
-      ${SEM.length ? `<label class="hint" style="display:block;margin-top:8px"><b>Semana</b> <select id="semSel">${SEM.map((w, i) => `<option value="${i}"${i === SEM.length - 1 ? ' selected' : ''}>${fLargo(w[0], w[1])}${i ? ' (vs. ' + fCorto(SEM[i - 1][0], SEM[i - 1][1]) + ')' : ''}</option>`).join('')}</select></label>` : '<p class="hint">Cargá primero el crudo de la semana.</p>'}
+  if (a === 'parte') { const SEM = semanasCargadas(), L = SEM.length - 1;
+    const meses = {}; SEM.forEach((w, i) => { const k = w[0].slice(0, 7); (meses[k] ||= []).push(i); });
+    $('#modalBody').className = ''; $('#modalBody').innerHTML = `<h2 style="margin:0 0 6px">Informe semanal o de período</h2><p class="hint">Elegí qué período mostrar y contra cuál compararlo. Cada semana es un crudo cargado. Sale con los filtros que tengas puestos (partido o comisaría). Sin relatos, nombres, DNI ni domicilios de víctimas.</p>
+      ${SEM.length ? `<div style="margin-top:10px"><b>Período</b><div class="seg" style="flex-wrap:wrap;gap:6px;margin:6px 0">
+          <button class="btn sm" type="button" onclick="pSet('A',${L},${L})">Última semana</button>${Object.entries(meses).map(([k, ix]) => `<button class="btn sm" type="button" onclick="pSet('A',${ix[0]},${ix.at(-1)})">${capW(MESES_N[+k.slice(5) - 1])}${ix.length < 4 ? ' (' + ix.length + ' sem.)' : ''}</button>`).join('')}</div>
+        <select id="pA0">${SEM.map((w, i) => `<option value="${i}"${i === L ? ' selected' : ''}>desde ${fLargo(w[0], w[0]).split(' al ')[0]} ${fLargo(w[0], w[0]).split(' al ')[1].replace(/^\d+ /, '')}</option>`).join('')}</select>
+        <select id="pA1">${SEM.map((w, i) => `<option value="${i}"${i === L ? ' selected' : ''}>hasta ${fLargo(w[1], w[1]).split(' al ')[1]}</option>`).join('')}</select></div>
+        <div style="margin-top:10px"><b>Comparar con</b><div style="margin:6px 0"><select id="pB" onchange="document.getElementById('pBx').hidden=this.value!=='x'"><option value="auto">El período anterior (misma cantidad de semanas)</option><option value="x">Elegir…</option><option value="no">Sin comparación</option></select></div>
+          <div id="pBx" hidden><select id="pB0">${SEM.map((w, i) => `<option value="${i}"${i === Math.max(0, L - 1) ? ' selected' : ''}>desde ${fLargo(w[0], w[0]).split(' al ')[0]} ${fLargo(w[0], w[0]).split(' al ')[1].replace(/^\d+ /, '')}</option>`).join('')}</select>
+          <select id="pB1">${SEM.map((w, i) => `<option value="${i}"${i === Math.max(0, L - 1) ? ' selected' : ''}>hasta ${fLargo(w[1], w[1]).split(' al ')[1]}</option>`).join('')}</select>
+          <div class="seg" style="flex-wrap:wrap;gap:6px;margin:6px 0">${Object.entries(meses).map(([k, ix]) => `<button class="btn sm" type="button" onclick="pSet('B',${ix[0]},${ix.at(-1)})">${capW(MESES_N[+k.slice(5) - 1])}</button>`).join('')}</div></div></div>` : '<p class="hint">Cargá primero el crudo de la semana.</p>'}
       <div style="display:grid;gap:8px;margin-top:10px"><button class="btn primary" data-act="partePdf">PDF para WhatsApp (recomendado)</button><span class="hint">Se abre la ventana de impresión: elegí “Guardar como PDF” y mandá ese archivo. Se abre en cualquier celular.</span>
       <button class="btn" data-act="parteHtml">Página interactiva (con mapa que se mueve)</button><span class="hint">Archivo .html: en el celular hay que abrirlo con Chrome y necesita internet para el mapa.</span>
       <button class="btn sm" onclick="document.getElementById('modal').hidden=true">Cancelar</button></div>`; $('#modal').hidden = false; return; }
-  if (a === 'partePdf' || a === 'parteHtml') { const si = +($('#semSel')?.value ?? -1); $('#modal').hidden = true; return generarParte(a === 'partePdf' ? 'pdf' : 'html', si); }
+  if (a === 'partePdf' || a === 'parteHtml') {
+    const SEM = semanasCargadas(), g = id => +($('#' + id)?.value ?? -1);
+    let i0 = g('pA0'), i1 = g('pA1'); if (i0 < 0) i0 = i1 = SEM.length - 1; if (i1 < i0) [i0, i1] = [i1, i0];
+    const A = [SEM[i0][0], SEM[i1][1]], modo = $('#pB')?.value || 'auto';
+    let B = null; if (modo === 'auto') B = periodoAnterior(SEM, i0, i1); else if (modo === 'x') { let j0 = g('pB0'), j1 = g('pB1'); if (j1 < j0) [j0, j1] = [j1, j0]; B = [SEM[j0][0], SEM[j1][1]]; }
+    $('#modal').hidden = true; return generarParte(a === 'partePdf' ? 'pdf' : 'html', { a: A, b: B }); }
   if (a === 'focoOrig') { FOCO = { orig: true }; pintarMapa._fit = false; return reAnalisis(); }
   if (a === 'bajarPuntos') return bajarPuntos();
   if (a === 'backupYa') return exportar();
