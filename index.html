@@ -2551,8 +2551,8 @@ function origenAprehendidos(base){
   const cen = {}; [...RECS.values()].forEach(r => { const ll = latlon(r); if (!ll || !r.localidad) return; const k = lugarN(r.localidad), c = (cen[k] ||= [0, 0, 0]); c[0] += +ll[0]; c[1] += +ll[1]; c[2]++; });
   LOCS_ORIG = null; const locPart = {}; [...RECS.values()].forEach(r => { if (r.localidad) locPart[lugarN(r.localidad)] ||= normP(r.partido); });
   const G = geoOrig(), centro = loc => { if (!loc) return null; const k = lugarN(loc); const c = cen[k]; if (c) return [c[0] / c[2], c[1] / c[2]]; const g = G[origKey(loc)]; return g ? g : null; };
-  const filas = H.map(r => { const o = String(val(r,'aorig')), loc = origenLoc(o), ol = lugarN(loc), hl = lugarN(r.localidad), ll = latlon(r), oc = centro(loc), pOrig = locPart[ol] || (ol === 'caba' ? 'CABA' : '');
-    return { r, texto: o, origen: loc || o, loc, destino: r.localidad, local: !!loc && ol === hl, otroPartido: !!pOrig && pOrig !== normP(r.partido), oc, ll: ll ? [+ll[0], +ll[1]] : null, km: oc && ll ? km(oc[0], oc[1], +ll[0], +ll[1]) : null }; });
+  const filas = H.map(r => { const o = String(val(r,'aorig')), loc = origenLoc(o), ol = lugarN(loc), hl = lugarN(ALIAS_LOC[lugarN(r.localidad)] || r.localidad), ll = latlon(r), oc = centro(loc), pOrig = locPart[ol] || (ol === 'caba' ? 'CABA' : '');
+    return { r, texto: o, origen: loc || o, loc, destino: ALIAS_LOC[lugarN(r.localidad)] || capW(r.localidad), local: !!loc && ol === hl, otroPartido: !!pOrig && pOrig !== normP(r.partido), oc, ll: ll ? [+ll[0], +ll[1]] : null, km: oc && ll ? km(oc[0], oc[1], +ll[0], +ll[1]) : null }; });
   const corr = topDe(filas.filter(f => !f.local).map(f => `${f.origen} → ${f.destino}`)).slice(0, 10);
   const porDest = {}; filas.forEach(f => { const d = f.destino, x = (porDest[d] ||= { n: 0, fuera: 0, orig: [] }); x.n++; if (!f.local) { x.fuera++; x.orig.push(f.origen); } });
   const kms = filas.map(f => f.km).filter(v => v != null).sort((a, b) => a - b);
