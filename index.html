@@ -893,7 +893,7 @@ function aplicarConfig(wb){
   lsSet(MODO + '_rd_cat', o); CATCFG = null; return true;
 }
 function hojaConfig(){ catDe('', ''); return XLSX.utils.json_to_sheet(Object.entries(CATCFG).map(([clave, valor]) => ({ clave, valor }))); }
-function catFila(x){ const iaDel = x.IA_delito ? String(x.IA_delito).toUpperCase().trim() : '', c = clasificarCaratula(x.calificaciones, x.relato); const d0 = DELITOS.includes(iaDel) ? iaDel : c.cat; if (d0 === 'AUTOMOTOR' && vehEsMoto(c.veh, String(x.calificaciones || '') + ' ' + String(x.relato || '').slice(0, 600))) return catDe('MOTOS', ''); return catDe(DELITOS.includes(iaDel) ? iaDel : c.cat, (DELITOS.includes(iaDel) ? x.IA_modalidad : c.mod) || ''); }
+function catFila(x){ const iaDel = x.IA_delito ? String(x.IA_delito).toUpperCase().trim() : '', c = clasificarCaratula(x.calificaciones, x.relato); const d0 = DELITOS.includes(iaDel) ? iaDel : c.cat; if (d0 === 'AUTOMOTOR') { const rec = RECS.get(idFila(x)); if (rec ? esMoto(rec) : vehEsMoto(c.veh, String(x.calificaciones || '') + ' ' + String(x.relato || '').slice(0, 600))) return catDe('MOTOS', ''); } return catDe(DELITOS.includes(iaDel) ? iaDel : c.cat, (DELITOS.includes(iaDel) ? x.IA_modalidad : c.mod) || ''); }
 function filasPaquete(a){ const ps = new Set(a.partidos.map(normP)); return LAST_ROWS.filter(x => ps.has(normP(x.partido_hecho)) && esUtil(x) && catFila(x) !== 'fuera'); }
 const idFila = x => String(x.delito_id ?? x.ipp ?? x.nro_registro).trim();
 // reparte el paquete de una zona entre sus operadoras: cada dependencia entera a una sola, en partes parejas
