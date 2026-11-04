@@ -1041,7 +1041,7 @@ function exportar(){
   sinceExport = 0; lsSet(MODO + '_rd_since', 0); actualizarBanner(); toast(MODO === 'supervisor' ? 'Excel consolidado exportado.' : 'Avance exportado. Mandáselo al supervisor.');
 }
 async function importarAvance(files){
-  let ok = 0, nuevos = 0; const lote = [];
+  let ok = 0, nuevos = 0, viejos = 0; const lote = [];
   for (const file of files) {
     let rows; try { const wb = await leerArchivo(file); rows = filasDe(wb, wb.Sheets['CARGA'] ? 'CARGA' : null); } catch(e){ return msgImport(e.message || String(e), true); }
     if (!rows.length || !('ID delito' in rows[0]) || !('DELITO' in rows[0])) return msgImport(`“${file.name}” no es un Excel de avance de NEXO. Si es un paquete o un crudo, cargalo arriba, en el paso 2.`, true);
@@ -1053,6 +1053,9 @@ async function importarAvance(files){
           altura: x.Altura ?? '', entre: x['Esquina / entre'] || '', dep: x.Dependencia || '', cal: x['Carátula original'] || '', relato: '', lat0: lat, lon0: lon,
           chk: lat != null ? 'OK' : 'SIN COORDENADA', fchk: 'OK', cal0: { cat:null, mod:'', why:'', veh:[] }, ia: x['Resumen IA'] ? { resumen: x['Resumen IA'] } : null, f: { coord: lat != null ? 'OK' : 'Sin dato' } };
         r.n = Math.max(0, ...[...RECS.values()].map(q => q.n || 0)) + 1; RECS.set(id, r); nuevos++; }
+      // si en esta PC ya hay una versión más nueva de ese hecho, no se pisa con un avance viejo
+      const tsN = x['Última modificación'] ? String(x['Última modificación']).trim() : '';
+      if (r.f.ts && (!tsN || tsN < r.f.ts)) { viejos++; continue; }
       for (const [h,,k] of EXPORT_COLS) {
         if (!k || !k.startsWith('f.') || !(h in x)) continue;
         const kk = k.slice(2); let v = x[h];
@@ -1072,8 +1075,8 @@ async function importarAvance(files){
     (Object.keys(quien).length ? `<div class="hint">Trabajados por: ${Object.entries(quien).map(([o, n]) => `${esc(o)} (${n})`).join(', ')}</div>` : '');
   const pend = lote.filter(r => (r.f.estado || 'Pendiente') === 'Pendiente').length;
   baseAnalisis({ todos:true }); const nRep = REPETIDOS.length;
-  $('#importSummary').innerHTML = `<div class="flag ok" style="font-size:13px;white-space:normal">Avance importado: ${ok} hechos actualizados${nuevos ? ` (${nuevos} que no estaban en esta computadora)` : ''}.</div>${filas}
-    ${pend === ok ? '<div class="flag warn" style="white-space:normal;font-size:12.5px">Ese Excel no trae ningún hecho trabajado. ¿La operadora lo exportó después de cargar? Pedile que toque “Enviar avance” de nuevo.</div>' : ''}
+  $('#importSummary').innerHTML = `<div class="flag ok" style="font-size:13px;white-space:normal">Avance importado: ${ok} hechos actualizados${nuevos ? ` (${nuevos} que no estaban en esta computadora)` : ''}.${viejos ? ` ${viejos} no se tocaron porque ya tenías una versión más nueva.` : ''}</div>${filas}
+    ${pend === ok && ok ? '<div class="flag warn" style="white-space:normal;font-size:12.5px">Ese Excel no trae ningún hecho trabajado. ¿La operadora lo exportó después de cargar? Pedile que toque “Enviar avance” de nuevo.</div>' : ''}
     ${nRep ? `<div class="flag warn" style="white-space:normal;font-size:12.5px;margin-top:6px">Hay ${nRep} hecho${nRep > 1 ? "s" : ""} repetido${nRep > 1 ? "s" : ""} en el sistema (el mismo hecho cargado dos veces). Se cuentan una sola vez; los ves en el análisis, en “Ir a: Repetidos”.</div>` : ""}
     <div style="margin-top:8px"><button class="btn primary" id="btnGoImp">Ver análisis</button></div>`;
   $('#btnGoImp').onclick = abrirMesa;
